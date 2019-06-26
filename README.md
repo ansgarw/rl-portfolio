@@ -15,5 +15,5 @@ When introducing new requirements (Python packages), add them to `requirements.t
 Then update the docker image by running 
 ```
 docker build -t ansgarw/rl-portfolio:latest rl-portfolio
-docker push ansgarw/privacydocker
+docker push ansgarw/rl-portfolio
 ```
