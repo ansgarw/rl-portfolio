@@ -4,9 +4,9 @@ The project uses a Docker image to ensure compatibility.
 
 Everyone [install Docker](https://docs.docker.com)!
 
-For now, we'll use an image from github which is set up 
-to work with Jupyter notebooks and most of the relevant 
-pacakges installed. 
+For now, we'll use a pre-built image which has Jupyter notebooks and 
+RL-relevant packages installed. 
+See: https://github.com/jaimeps/docker-rl-gym
 
 To install it, run
 ```
