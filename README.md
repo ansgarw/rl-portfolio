@@ -17,4 +17,3 @@ Then update the docker image by running
 docker build -t ansgarw/rl-portfolio:latest rl-portfolio
 docker push ansgarw/privacydocker
 ```
-(at the moment only Ansgar has permission to push, let's look into changing this)
