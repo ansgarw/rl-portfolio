@@ -352,12 +352,12 @@ class A2C_Agent_Value():
 
     #Function to decide action given state
     def Decide_Action (self, State, optimal = False):
-        Mu    = self.TF_Session.run(self.Policy_Model.Mus, feed_dict = {self.Policy_Model.observations:State})
+        Mu    = self.TF_Session.run(self.Policy_Model.Mus, feed_dict = {self.Policy_Model.States:State})
         if optimal == True:
             Action = np.clip(Mu, self.Env.action_space.low, self.Env.action_space.high)
             return Action.reshape(-1,self.Action_dim)
         
-        Sigma = self.TF_Session.run(self.Policy_Model.Sigmas, feed_dict = {self.Policy_Model.observations:State})                
+        Sigma = self.TF_Session.run(self.Policy_Model.Sigmas, feed_dict = {self.Policy_Model.States:State})                
         Action = np.clip(np.random.normal(Mu, Sigma), self.Env.action_space.low, self.Env.action_space.high)
         return Action.reshape(-1,self.Action_dim), Sigma
 
