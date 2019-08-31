@@ -237,7 +237,7 @@ class Actor_Critic:
 
             Sigma = max(self.Sigma_Range[0] - ((self.Sigma_Range[0] - self.Sigma_Range[1]) * (i / (self.Sigma_Anneal * N_Episodes))), self.Sigma_Range[1])
             # Sigma = (Sigma * ((self.Sigma_Range[1] / self.Sigma_Range[0]) ** (1/(self.Sigma_Anneal * 1e5))))
-            Actor_LR = self.Actor_Hypers["Learning Rate"] #* (Sigma)
+            Actor_LR = self.Actor_Hypers["Learning Rate"] * (Sigma)
 
             while Done == False:
                 Mu = self.Actor.Predict(State_0.reshape(1, self.State_Dim))
