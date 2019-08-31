@@ -1,23 +1,15 @@
-# import random
-import numpy             as np
-
-# import gym
-# import gym_Merton
-
-# import os
-# os.system('clear')
-
-
+import numpy as np
 
 # A Neural Network, with squared loss.
 class Critic_NeuralNet:
     def __init__ (self, Shape, Input_Dim, Output_Dim, Learning_Rate = 0.01,
-                  Epoch = 1, Activation = "Relu"):
+                  Epoch = 1, Activation = "Relu", Alpha = 0.005):
         self.Weights = list()
         self.Biases  = list()
         self.Learning_Rate = Learning_Rate
         self.Output_Dim    = Output_Dim
         self.Epoch         = Epoch
+        self.Alpha         = Alpha
 
         if Activation == "Relu":
             self.Act   = self.Relu
@@ -80,7 +72,7 @@ class Critic_NeuralNet:
             dA = (self.d_Loss(Z, Y)).T if i+1 == len(self.Weights) else (self.d_Act(A).T * dZ)
 
             # get parameter gradients
-            dW = np.matmul(dA, Z_Prev) / X.shape[0]
+            dW = (np.matmul(dA, Z_Prev) / X.shape[0]) + ((self.Alpha * W.T) / X.shape[0])
             dB = np.sum(dA, axis=1).reshape(-1,1) / X.shape[0]
             Grads.append({'Weight' : dW, 'Bias' : dB})
 
@@ -106,12 +98,13 @@ class Critic_NeuralNet:
 # A Neural Network, with custom loss function for Mu only policy gradient
 class Policy_NeuralNet:
     def __init__ (self, Shape, Input_Dim, Output_Dim, Learning_Rate = 0.01,
-                  Epoch = 1, Activation = "Relu"):
+                  Epoch = 1, Activation = "Relu", Alpha = 0.0001):
         self.Weights = list()
         self.Biases  = list()
         self.Learning_Rate = Learning_Rate
         self.Output_Dim    = Output_Dim
         self.Epoch         = Epoch
+        self.Alpha         = Alpha
 
         if Activation == "Relu":
             self.Act   = self.Relu
@@ -174,7 +167,7 @@ class Policy_NeuralNet:
             dA = (self.d_Loss(Action, Z, Reward, Sigma)).T if i+1 == len(self.Weights) else (self.d_Act(A).T * dZ)
 
             # get parameter gradients
-            dW = np.matmul(dA, Z_Prev) / State.shape[0]
+            dW = (np.matmul(dA, Z_Prev) / State.shape[0]) + ((self.Alpha * W.T) / State.shape[0])
             dB = np.sum(dA, axis=1).reshape(-1,1) / State.shape[0]
             Grads.append({'Weight' : dW, 'Bias' : dB})
 
@@ -216,12 +209,14 @@ class Actor_Critic:
         self.Actor  = Policy_NeuralNet(self.Actor_Hypers["Network Size"], self.State_Dim, self.Action_Dim,
                                        Learning_Rate = self.Actor_Hypers["Learning Rate"],
                                        Activation    = self.Actor_Hypers["Activation"],
-                                       Epoch         = self.Actor_Hypers["Epoch"])
+                                       Epoch         = self.Actor_Hypers["Epoch"],
+                                       Alpha         = self.Actor_Hypers["Alpha"])
 
         self.Critic = Critic_NeuralNet(self.Critic_Hypers["Network Size"], self.State_Dim, 1,
                                        Learning_Rate = self.Critic_Hypers["Learning Rate"],
                                        Activation    = self.Critic_Hypers["Activation"],
-                                       Epoch         = self.Critic_Hypers["Epoch"])
+                                       Epoch         = self.Critic_Hypers["Epoch"],
+                                       Alpha         = self.Critic_Hypers["Alpha"])
 
         self.Environment = Environment
 
@@ -241,7 +236,8 @@ class Actor_Critic:
             State_0 = self.Environment.reset()
 
             Sigma = max(self.Sigma_Range[0] - ((self.Sigma_Range[0] - self.Sigma_Range[1]) * (i / (self.Sigma_Anneal * N_Episodes))), self.Sigma_Range[1])
-            Actor_LR = self.Actor_Hypers["Learning Rate"] * (Sigma)
+            # Sigma = (Sigma * ((self.Sigma_Range[1] / self.Sigma_Range[0]) ** (1/(self.Sigma_Anneal * 1e5))))
+            Actor_LR = self.Actor_Hypers["Learning Rate"] #* (Sigma)
 
             while Done == False:
                 Mu = self.Actor.Predict(State_0.reshape(1, self.State_Dim))
@@ -255,7 +251,6 @@ class Actor_Critic:
 
             for j in range(len(Episode_Exp) - 1)[::-1]:
                 Episode_Exp[j]["r"] += Episode_Exp[j+1]["r"] * self.Gamma
-                # Episode_Exp[j]["r"] += self.Actor.Predict(Episode_Exp[j]["s1"].reshape(1, self.State_Dim))[0,0] * self.Gamma
             Exp.extend(Episode_Exp)
 
 
@@ -282,6 +277,5 @@ class Actor_Critic:
                     Plot_Data.append({"Policy" : self.Actor.Predict(Test_State).reshape(-1, self.Action_Dim),
                                       "Value"  : self.Critic.Predict(Test_State).reshape(-1),
                                       "Title"  : str(i + 1) + " Eps"})
-
 
         return [Mus, Plot_Data]
