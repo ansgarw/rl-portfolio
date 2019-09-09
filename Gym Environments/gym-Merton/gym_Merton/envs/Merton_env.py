@@ -62,11 +62,11 @@ class MertonEnv(gym.Env):
             warnings.warn("Action attempted when episode is over.", Warning)
 
         if self.RISK_AVERSION == 1 and self.INTERMEDIATE_REWARD == True:
-            self.Reward    = np.log(self.Wealth)
+            self.Reward = self.Utility()
 
-        self.Wealth   *= self.RETURN_FUNC(action)
-        self.Tau      -= self.TIME_STEP
-        self.State     = np.array([self.Tau, self.Wealth])
+        self.Wealth *= self.RETURN_FUNC(action)
+        self.Tau    -= self.TIME_STEP
+        self.State   = np.array([self.Tau, self.Wealth])
 
         # Old Version
         # Period_Return  = self.RETURN_FUNC(self.MU, self.SIGMA, self.TIME_STEP, self.ROW) - (self.RF * self.TIME_STEP)
@@ -74,7 +74,7 @@ class MertonEnv(gym.Env):
 
 
         if self.RISK_AVERSION == 1 and self.INTERMEDIATE_REWARD == True:
-            self.Reward = (np.log(self.Wealth) - self.Reward) * 100
+            self.Reward = (self.Utility() - self.Reward)
         else:
             self.Reward = 0
 
@@ -82,6 +82,7 @@ class MertonEnv(gym.Env):
         if self.Tau <= 0 or self.Wealth <= 0:
             self.Done = True
             self.Reward = self.Utility()
+            self.State[0] = 0
 
         return self.State, self.Reward, self.Done, {}
 

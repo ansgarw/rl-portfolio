@@ -2,8 +2,8 @@ import numpy as np
 
 # A Neural Network, with squared loss.
 class Critic_NeuralNet:
-    def __init__ (self, Shape, Input_Dim, Output_Dim, Learning_Rate = 0.01,
-                  Epoch = 1, Activation = "Relu", Alpha = 0.005):
+
+    def __init__ (self, Shape, Input_Dim, Output_Dim, Learning_Rate = 0.01, Epoch = 1, Activation = "Relu", Alpha = 0.005):
         self.Weights = list()
         self.Biases  = list()
         self.Learning_Rate = Learning_Rate
