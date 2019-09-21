@@ -20,7 +20,7 @@ class Critic_NeuralNet:
 
         self.Shape = [Input_Dim] + Shape + [Output_Dim]
         for i in range(1, len(self.Shape)):
-            self.Weights.append(np.random.normal(0, 1, (self.Shape[i-1], self.Shape[i])))
+            self.Weights.append(np.random.normal(0, 1, (self.Shape[i-1], self.Shape[i])) / (self.Shape[i-1] + self.Shape[i]))
             self.Biases.append(np.random.normal(0, 1, (self.Shape[i], 1)))
 
         self.As      = [None] * (len(self.Weights) + 1)   #Pre Sigmoid
@@ -225,9 +225,10 @@ class Actor_Critic:
         Exp = []
         Mus = []
 
-        Record_Eps  = np.linspace(0, N_Episodes, self.Plot_Frequency).astype(int) - 1
-        Record_Eps[0] = 0
-        Plot_Data = []
+        if (self.Plot_Frequency > 0):
+            Record_Eps  = np.linspace(0, N_Episodes, self.Plot_Frequency).astype(int) - 1
+            Record_Eps[0] = 0
+            Plot_Data = []
 
 
         for i in range(N_Episodes):
@@ -266,16 +267,50 @@ class Actor_Critic:
 
                 Exp = []
 
-            if np.any(i == Record_Eps):
-                Test_State = np.hstack((np.zeros((20,1)), np.linspace(0,1,20).reshape(-1,1)))
-                if self.Action_Dim == 1:
-                    Plot_Data.append({"Policy" : self.Actor.Predict(Test_State).reshape(-1),
-                                      "Value"  : self.Critic.Predict(Test_State).reshape(-1),
-                                      "Title"  : str(i + 1) + " Eps"})
+            if self.Plot_Frequency > 0:
+                if np.any(i == Record_Eps):
+                    Test_State = np.hstack((np.zeros((20,1)), np.linspace(0,1,20).reshape(-1,1)))
+                    if self.Action_Dim == 1:
+                        Plot_Data.append({"Policy" : self.Actor.Predict(Test_State).reshape(-1),
+                                          "Value"  : self.Critic.Predict(Test_State).reshape(-1),
+                                          "Title"  : str(i + 1) + " Eps"})
 
-                else:
-                    Plot_Data.append({"Policy" : self.Actor.Predict(Test_State).reshape(-1, self.Action_Dim),
-                                      "Value"  : self.Critic.Predict(Test_State).reshape(-1),
-                                      "Title"  : str(i + 1) + " Eps"})
+                    else:
+                        Plot_Data.append({"Policy" : self.Actor.Predict(Test_State).reshape(-1, self.Action_Dim),
+                                          "Value"  : self.Critic.Predict(Test_State).reshape(-1),
+                                          "Title"  : str(i + 1) + " Eps"})
 
-        return [Mus, Plot_Data]
+        if self.Plot_Frequency > 0:
+            return [Mus, Plot_Data]
+        else:
+            return Mus
+
+
+    def Validate (self, N_Episodes):
+        '''
+        A validation function used to appraise the performance of the agent across N episodes.
+
+        Parameters
+        ----------
+            N_Episodes : The number of episodes to validate across.
+
+        Returns
+        -------
+            A list of terminal rewards.
+        '''
+
+        Terminal_Rewards = []
+        self.Environment.isTraining = False
+
+        for i in range(N_Episodes):
+            State = self.Environment.reset()
+            Done = False
+
+            while Done == False:
+                Action = self.Actor.Predict(State.reshape(1, self.State_Dim))
+                State, Reward, Done, Info = self.Environment.step(Action.reshape(-1))
+                if Done:
+                    Terminal_Rewards.append(Reward)
+
+        self.Environment.isTraining = True
+        return Terminal_Rewards
