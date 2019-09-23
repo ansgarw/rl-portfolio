@@ -366,36 +366,77 @@ class DQN:
                 self.Q_Network.Fit(X, Y, Z)
 
 
-    def Validate (self, N_Episodes):
-        '''
-        A validation function used to appraise the performance of the agent across N episodes.
-
-        Parameters
-        ----------
-            N_Episodes : The number of episodes to validate across.
-
-        Returns
-        -------
-            A list of terminal rewards.
-        '''
-
-        Terminal_Rewards = []
-        self.Environment.isTraining = False
-
-        for i in range(N_Episodes):
-            State = self.Environment.reset()
-            Done = False
-
-            while Done == False:
-                Action_idx =  np.argmax(self.Q_Network.Predict(State.reshape(1, self.State_Dim)))
-                State, Reward, Done, Info = self.Environment.step(self.Action_Space[Action_idx])
-                if Done:
-                    Terminal_Rewards.append(Reward)
-
-        self.Environment.isTraining = True
-        return Terminal_Rewards
-
-
-    def Predict (self, X):
+    def Predict_Q (self, X):
         ''' A simple pedict fucntion to extract predictions from the agent without having to call methods on the internal network '''
         return self.Q_Network.Predict(X)
+
+
+    def Predict_Action(self, X):
+        ''' returns the optimal action per the Q Network '''
+        return self.Action_Space[np.argmax(self.Q_Network.Predict(X), axis = 1)]
+
+
+    # Mark for delete
+    # def Validate (self, N_Episodes):
+    #     '''
+    #     A validation function used to appraise the performance of the agent across N episodes.
+    #
+    #     Parameters
+    #     ----------
+    #         N_Episodes : The number of episodes to validate across.
+    #
+    #     Returns
+    #     -------
+    #         A tuple of the following:
+    #             0. A list of terminal rewards.
+    #             1. A list of terminal rewards holding the risk free asset
+    #             2. A list of terminal rewards holding the post ante merton portfolios. (Impossible best case)
+    #     '''
+    #
+    #     Terminal_Rewards = []
+    #     Risk_Free_Reward = []
+    #     Post_Ante_Reward = []
+    #     Ex_Ante_Rewards  = []
+    #     self.Environment.isTraining = False
+    #
+    #     for i in range(N_Episodes):
+    #         RF_Ret = 1
+    #         Returns = []
+    #         RF_Returns = []
+    #         State = self.Environment.reset()
+    #         Done = False
+    #
+    #         while Done == False:
+    #             Action_idx =  np.argmax(self.Q_Network.Predict(State.reshape(1, self.State_Dim)))
+    #             State, Reward, Done, Info = self.Environment.step(self.Action_Space[Action_idx])
+    #             RF_Ret *= (1 + Info['Rfree'])
+    #             Returns.append(Info['Mkt-Rf'])
+    #             RF_Returns.append(Info['Rfree'])
+    #
+    #             if Done:
+    #                 Terminal_Rewards.append(Reward)
+    #                 Risk_Free_Reward.append(self.Utility(RF_Ret))
+    #                 Merton_Frac = np.mean(Returns) / ((np.std(Returns) ** 2) * self.Environment.Risk_Aversion)
+    #
+    #                 Post_Ante_Merton = 1
+    #                 Ex_Ante_Merton   = 1
+    #                 for i in range(len(Returns)):
+    #                     Post_Ante_Merton *= (1 + RF_Returns[i] + Returns[i] * Merton_Frac)
+    #                     Ex_Ante_Merton   *= (1 + RF_Returns[i] + Returns[i] * self.Environment.Training_Merton)
+    #                 Post_Ante_Reward.append(self.Utility(Post_Ante_Merton))
+    #                 Ex_Ante_Rewards.append(self.Utility(Ex_Ante_Merton))
+    #
+    #
+    #     self.Environment.isTraining = True
+    #     return Terminal_Rewards, Risk_Free_Reward, Post_Ante_Reward, Ex_Ante_Rewards
+    #
+    #
+    # def Utility (self, Wealth):
+    #     ''' Determine the utility of the investor at the end of life '''
+    #     if Wealth <= 0:
+    #         return -10
+    #     elif self.Environment.Risk_Aversion == 1:
+    #         return np.log(Wealth)
+    #     else:
+    #         return (Wealth ** (1 - self.Risk_Aversion)) / (1 - self.Risk_Aversion)
+    #

@@ -35,6 +35,7 @@ class HistoricalEnv(gym.Env):
         self.Max_Leverage    = kwargs['Max_Leverage']
         self.Min_Leverage    = kwargs['Min_Leverage']
         self.Validation_Frac = kwargs['Validation_Frac']
+        self.Intermediate_Reward = False
 
         # Flag used to distinguish a training episode from a validation epiodse, to facilitate cross val.
         self.isTraining = True
@@ -51,12 +52,13 @@ class HistoricalEnv(gym.Env):
             self.Data.drop(columns = ["Cross-Sectional Premium"])
             self.Data = self.Data.dropna()
             self.Data["Mkt-RF"] = self.Data["Mkt-RF"] / 100
+            self.Data['Risk-Free Rate'] = self.Data['Risk-Free Rate'] / 100
             self.Data = self.Data.reset_index(drop = True)
 
             self.X = "Mkt-RF"
             self.Y = list(self.Data.columns.values)
             self.Y.remove("Unnamed: 0")
-            self.Rf = "RF"
+            self.Rf = "Risk-Free Rate"
 
 
         elif self.Time_Step == "Monthly":
@@ -75,6 +77,7 @@ class HistoricalEnv(gym.Env):
 
         # Plus two as wealth and tau are also part of the state space.
         self.observation_space = gym.spaces.Box(low = np.array([-np.inf] * (len(self.Y) + 2)), high = np.array([np.inf] * (len(self.Y) + 2)), dtype = np.float32)
+        self.Reset_Validation_Data()
 
 
     def Set_Params(self, **kwargs):
@@ -91,21 +94,44 @@ class HistoricalEnv(gym.Env):
 
         '''
 
-        self.Risk_Aversion   = kwargs['Risk_Aversion']   if 'Risk_Aversion'   in kwargs.keys() else self.Risk_Aversion
-        self.Episode_Length  = kwargs['Episode_Length']  if 'Episode_Length'  in kwargs.keys() else self.Episode_Length
-        self.Max_Leverage    = kwargs['Max_Leverage']    if 'Max_Leverage'    in kwargs.keys() else self.Max_Leverage
-        self.Min_Leverage    = kwargs['Min_Leverage']    if 'Min_Leverage'    in kwargs.keys() else self.Min_Leverage
-        self.Validation_Frac = kwargs['Validation_Frac'] if 'Validation_Frac' in kwargs.keys() else self.Validation_Frac
+        self.Risk_Aversion       = kwargs['Risk_Aversion']       if 'Risk_Aversion'       in kwargs.keys() else self.Risk_Aversion
+        self.Episode_Length      = kwargs['Episode_Length']      if 'Episode_Length'      in kwargs.keys() else self.Episode_Length
+        self.Max_Leverage        = kwargs['Max_Leverage']        if 'Max_Leverage'        in kwargs.keys() else self.Max_Leverage
+        self.Min_Leverage        = kwargs['Min_Leverage']        if 'Min_Leverage'        in kwargs.keys() else self.Min_Leverage
+        self.Validation_Frac     = kwargs['Validation_Frac']     if 'Validation_Frac'     in kwargs.keys() else self.Validation_Frac
+        self.Intermediate_Reward = kwargs['Intermediate_Reward'] if 'Intermediate_Reward' in kwargs.keys() else self.Intermediate_Reward
 
         self.action_space = gym.spaces.Box(low = self.Min_Leverage, high = self.Max_Leverage, shape = (1,), dtype = np.float32)
 
 
         for key in kwargs.keys():
-            if not key in ('Risk_Aversion', 'Episode_Length', 'Max_Leverage', 'Min_Leverage', 'Validation_Frac'):
+            if not key in ('Risk_Aversion', 'Episode_Length', 'Max_Leverage', 'Min_Leverage', 'Validation_Frac', 'Intermediate_Reward'):
                 print("Keyword:", key, "not recognised.")
 
         if "Time_Step" in kwargs.keys():
             warnings.warn("Time_Step may not be changed, please use the daily/monthly environment")
+
+
+    def Reset_Validation_Data (self, Set_last = False):
+        '''
+        Reset the location of the holdout validation dataset (In order to prevent overfitting hyper parameters to the validation set.)
+
+        Parameters
+        ----------
+            Set_last : A boolean indicating whether the validation set should be the last x percent of the dataset.
+        '''
+
+        if Set_last == False:
+            self.Validation_Start = np.random.randint(low = self.Episode_Length, high = (self.Data.shape[0] * (1 - self.Validation_Frac)) - self.Episode_Length)
+            self.Validation_End   = self.Validation_Start + int(self.Data.shape[0] * self.Validation_Frac)
+        else:
+            self.Validation_Start = int(self.Data.shape[0] * (1 - self.Validation_Frac))
+            self.Validation_End   = int(self.Data.shape[0])
+
+        Mean = np.mean(np.append(self.Data.iloc[0:self.Validation_Start][self.X].values, self.Data.iloc[self.Validation_End::][self.X].values))
+        Vars = np.var(np.append(self.Data.iloc[0:self.Validation_Start][self.X].values, self.Data.iloc[self.Validation_End::][self.X].values))
+
+        self.Training_Merton = Mean / (Vars * self.Risk_Aversion)
 
 
     def reset (self):
@@ -121,15 +147,24 @@ class HistoricalEnv(gym.Env):
         '''
 
         if self.isTraining == True:
-            self.Start_Index = np.random.randint(low = 0, high = (self.Data.shape[0] * (1 - self.Validation_Frac)) - self.Episode_Length)
+            Possible_Indexes = np.append(np.arange(self.Validation_Start - self.Episode_Length), np.arange(self.Validation_End, self.Data.shape[0] - self.Episode_Length))
+            self.Start_Index = np.random.choice(Possible_Indexes)
             self.Wealth = np.random.uniform()
         else:
-            self.Start_Index = np.random.randint(low = (self.Data.shape[0] * (1 - self.Validation_Frac)), high = self.Data.shape[0] - self.Episode_Length)
+            self.Start_Index = np.random.randint(low = self.Validation_Start, high = self.Validation_End - self.Episode_Length)
             # When validating we want to start each epsiode with the same wealth, as this makes the terminal utility comparable.
             self.Wealth = 1
 
         self.End_Index = self.Start_Index + self.Episode_Length
         self.Index = self.Start_Index
+
+        # Ensure the training / validation split is operating properly
+        if self.isTraining == True:
+            assert not (self.Start_Index > self.Validation_Start and self.Start_Index < self.Validation_End), 'Validation set breached.'
+            assert not (self.End_Index > self.Validation_Start and self.End_Index < self.Validation_End), 'Validation set breached.'
+        else:
+            assert (self.Start_Index >= self.Validation_Start and self.Start_Index <= self.Validation_End), 'Training set breached.'
+            assert (self.End_Index >= self.Validation_Start and self.End_Index <= self.Validation_End), 'Training set breached.'
 
         self.Reward = 0
         self.Done   = False
@@ -156,6 +191,13 @@ class HistoricalEnv(gym.Env):
         assert self.Done == False, "Attempt to take an action whilst Done == True"
         assert self.action_space.contains(Action), "Action %r is not within the action space" % (Action)
 
+        Return = (1 + self.Data.iloc[self.Index][self.Rf] + self.Data.iloc[self.Index][self.X] * Action[0])
+
+        if self.Intermediate_Reward == True and self.Risk_Aversion == 1:
+            self.Reward = self.Utility(self.Wealth * Return) - self.Utility()
+        else:
+            self.Reward = 0
+
         self.Index += 1
         self.Wealth *= (1 + self.Data.iloc[self.Index][self.Rf] + self.Data.iloc[self.Index][self.X] * Action[0])
 
@@ -163,7 +205,7 @@ class HistoricalEnv(gym.Env):
             self.Done = True
             self.Reward = self.Utility()
 
-        return self.Gen_State(), self.Reward, self.Done, {}
+        return self.Gen_State(), self.Reward, self.Done, self.Gen_Info()
 
 
     def render (self):
@@ -180,11 +222,89 @@ class HistoricalEnv(gym.Env):
         return np.append([self.Wealth, Tau], self.Data.iloc[self.Index][self.Y].values)
 
 
-    def Utility (self):
+    def Gen_Info (self):
+        '''
+        Info contains information external to the state which may be used during validation to provide a benchmark to check
+        the agent against.
+
+        Returns
+        -------
+            A dictionary with the following keys:
+                    'Rfree'  : The current risk free rate
+                    'Mkt-Rf' : The market excess return on the step
+        '''
+
+        Info = {'Mkt-Rf' : self.Data.iloc[self.Index][self.X]}
+
+        if self.Time_Step == 'Daily':
+            Info['Rfree'] = self.Data.iloc[self.Index]['Risk-Free Rate']
+        elif self.Time_Step == 'Monthly':
+            Info['Rfree'] = self.Data.iloc[self.Index]['Rfree']
+
+        return Info
+
+
+    def Utility (self, *args):
         ''' Determine the utility of the investor at the end of life '''
-        if self.Wealth <= 0:
+
+        if len(args) == 1:
+            Wealth = args[0]
+        else:
+            Wealth = self.Wealth
+
+        if Wealth <= 0:
             return -10
         elif self.Risk_Aversion == 1:
-            return np.log(self.Wealth)
+            return np.log(Wealth)
         else:
-            return (self.Wealth ** (1 - self.Risk_Aversion)) / (1 - self.Risk_Aversion)
+            return (Wealth ** (1 - self.Risk_Aversion)) / (1 - self.Risk_Aversion)
+
+
+    def Validate (self, N_Episodes, Agent):
+        '''
+        A validation function used to appraise the performance of an agent across N episodes.
+
+        Parameters
+        ----------
+            N_Episodes : The number of episodes to validate across.
+
+        Returns
+        -------
+            A tuple of the following:
+                0. A list of terminal rewards.
+                1. A list of terminal rewards holding the risk free asset
+                2. A list of terminal rewards holding the ex ante merton protfolio (calculated across trianing dataset)
+        '''
+
+        Terminal_Rewards  = []
+        Risk_Free_Rewards = []
+        Merton_Rewards    = []
+
+        self.isTraining = False
+
+        for i in range(N_Episodes):
+            Returns = []
+            RF_Returns = []
+            State = self.reset()
+            Done = False
+
+            while Done == False:
+                Action = Agent.Predict_Action(State.reshape(1, self.observation_space.shape[0]))
+                State, Reward, Done, Info = self.step(Action[0])
+                Returns.append(Info['Mkt-Rf'])
+                RF_Returns.append(Info['Rfree'])
+
+                if Done:
+                    Merton_Return = 1
+                    RFree_Return  = 1
+                    for i in range(len(Returns)):
+                        RFree_Return  *= (1 + RF_Returns[i])
+                        Merton_Return *= (1 + RF_Returns[i] + Returns[i] * self.Training_Merton)
+
+                    Risk_Free_Rewards.append(self.Utility(RFree_Return))
+                    Merton_Rewards.append(self.Utility(Merton_Return))
+                    Terminal_Rewards.append(Reward)
+
+
+        self.isTraining = True
+        return Terminal_Rewards, Risk_Free_Rewards, Merton_Rewards

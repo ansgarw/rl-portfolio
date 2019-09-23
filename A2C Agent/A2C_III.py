@@ -285,32 +285,38 @@ class Actor_Critic:
         else:
             return Mus
 
+    def Predict_Action (self, X):
+        ''' Returns the optimal action given a state '''
+        return self.Actor.Predict(X.reshape(1, self.State_Dim))
 
-    def Validate (self, N_Episodes):
-        '''
-        A validation function used to appraise the performance of the agent across N episodes.
 
-        Parameters
-        ----------
-            N_Episodes : The number of episodes to validate across.
 
-        Returns
-        -------
-            A list of terminal rewards.
-        '''
-
-        Terminal_Rewards = []
-        self.Environment.isTraining = False
-
-        for i in range(N_Episodes):
-            State = self.Environment.reset()
-            Done = False
-
-            while Done == False:
-                Action = self.Actor.Predict(State.reshape(1, self.State_Dim))
-                State, Reward, Done, Info = self.Environment.step(Action.reshape(-1))
-                if Done:
-                    Terminal_Rewards.append(Reward)
-
-        self.Environment.isTraining = True
-        return Terminal_Rewards
+    # Marked for delete
+    # def Validate (self, N_Episodes):
+    #     '''
+    #     A validation function used to appraise the performance of the agent across N episodes.
+    #
+    #     Parameters
+    #     ----------
+    #         N_Episodes : The number of episodes to validate across.
+    #
+    #     Returns
+    #     -------
+    #         A list of terminal rewards.
+    #     '''
+    #
+    #     Terminal_Rewards = []
+    #     self.Environment.isTraining = False
+    #
+    #     for i in range(N_Episodes):
+    #         State = self.Environment.reset()
+    #         Done = False
+    #
+    #         while Done == False:
+    #             Action = self.Actor.Predict(State.reshape(1, self.State_Dim))
+    #             State, Reward, Done, Info = self.Environment.step(Action.reshape(-1))
+    #             if Done:
+    #                 Terminal_Rewards.append(Reward)
+    #
+    #     self.Environment.isTraining = True
+    #     return Terminal_Rewards
