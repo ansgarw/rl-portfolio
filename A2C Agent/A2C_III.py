@@ -1,4 +1,5 @@
 import numpy as np
+import tqdm
 
 # A Neural Network, with squared loss.
 class Critic_NeuralNet:
@@ -220,30 +221,58 @@ class Actor_Critic:
 
         self.Environment = Environment
 
-    def Train (self, N_Episodes):
+
+    def Train (self, N_Episodes, Plot = ()):
+
+        '''
+        Train the AC agent in its specified environment.
+
+        Parameters
+        ----------
+            N_Episodes : The number of episodes the agent should be trained for. Note parameters like
+                         sigma and learning rate decay scale with the number of episodes.
+
+            Plot       : A dictionary of plots which the function should return.
+                         Accepted inputs include:
+                            1. Mu   : This will return a plot of the pre sigma predictions made by the agent.
+                                      It will have lenght equivalent to the total number of steps in the training episodes,
+                                      and will have the same dimensions as the actionspace.
+
+                            2. Mu_2 : This will return a plot of the post sigma predictions produced by the agent.
+                                      It will have lenght equivalent to the total number of steps in the training episodes,
+                                      and will have the same dimensions as the actionspace.
+
+                            3. Merton_Sim : A plot of the policy and value function wrt wealth. To be used only with the
+                                            simulated merton environment.
+
+        Returns
+        -------
+            A dictionary with the same keys as Plot, which contains the requested plotting data.
+        '''
+
+        Plot_Data = {}
+        for key in Plot:
+            Plot_Data[key] = []
 
         Exp = []
-        Mus = []
-
-        if (self.Plot_Frequency > 0):
-            Record_Eps  = np.linspace(0, N_Episodes, self.Plot_Frequency).astype(int) - 1
-            Record_Eps[0] = 0
-            Plot_Data = []
+        Record_Eps = np.linspace(0, N_Episodes - 1, self.Plot_Frequency).astype(int)
 
 
-        for i in range(N_Episodes):
+        for i in tqdm.tqdm(range(N_Episodes)):
             Done = False
             Episode_Exp = []
             State_0 = self.Environment.reset()
 
             Sigma = max(self.Sigma_Range[0] - ((self.Sigma_Range[0] - self.Sigma_Range[1]) * (i / (self.Sigma_Anneal * N_Episodes))), self.Sigma_Range[1])
-            # Sigma = (Sigma * ((self.Sigma_Range[1] / self.Sigma_Range[0]) ** (1/(self.Sigma_Anneal * 1e5))))
             Actor_LR = self.Actor_Hypers["Learning Rate"] * (Sigma)
 
             while Done == False:
                 Mu = self.Actor.Predict(State_0.reshape(1, self.State_Dim))
-                Mus.append(list(Mu.reshape(-1)))
+                # Mus.append(list(Mu.reshape(-1)))
                 Leverage = np.random.normal(Mu, Sigma)
+
+                if 'Mu'   in Plot : Plot_Data['Mu'].append(list(Mu.flatten()))
+                if 'Mu_2' in Plot : Plot_Data['Mu_2'].append(list(Leverage.flatten()))
 
                 State_1, Reward, Done, Info = self.Environment.step(Leverage[0])
                 Episode_Exp.append({"s0" : State_0, "s1" : State_1, "r" : Reward, "a" : Leverage})
@@ -267,56 +296,22 @@ class Actor_Critic:
 
                 Exp = []
 
-            if self.Plot_Frequency > 0:
-                if np.any(i == Record_Eps):
-                    Test_State = np.hstack((np.zeros((20,1)), np.linspace(0,1,20).reshape(-1,1)))
-                    if self.Action_Dim == 1:
-                        Plot_Data.append({"Policy" : self.Actor.Predict(Test_State).reshape(-1),
-                                          "Value"  : self.Critic.Predict(Test_State).reshape(-1),
-                                          "Title"  : str(i + 1) + " Eps"})
+            # Now check if any intermitant plots need to be generated:
+            if np.any(i == Record_Eps):
+                if 'Merton_Sim' in Plot : Plot_Data['Merton_Sim'].append(self.Merton_Sim_Plot(i))
 
-                    else:
-                        Plot_Data.append({"Policy" : self.Actor.Predict(Test_State).reshape(-1, self.Action_Dim),
-                                          "Value"  : self.Critic.Predict(Test_State).reshape(-1),
-                                          "Title"  : str(i + 1) + " Eps"})
+        return Plot_Data
 
-        if self.Plot_Frequency > 0:
-            return [Mus, Plot_Data]
-        else:
-            return Mus
 
     def Predict_Action (self, X):
         ''' Returns the optimal action given a state '''
         return self.Actor.Predict(X.reshape(1, self.State_Dim))
 
 
+    def Merton_Sim_Plot (self, i):
+        Test_State = np.hstack((np.zeros((20,1)), np.linspace(0,1,20).reshape(-1,1)))
+        Data = {"Policy" : self.Actor.Predict(Test_State).reshape(-1, self.Action_Dim),
+                "Value"  : self.Critic.Predict(Test_State).reshape(-1),
+                "Title"  : str(i + 1) + " Eps"}
 
-    # Marked for delete
-    # def Validate (self, N_Episodes):
-    #     '''
-    #     A validation function used to appraise the performance of the agent across N episodes.
-    #
-    #     Parameters
-    #     ----------
-    #         N_Episodes : The number of episodes to validate across.
-    #
-    #     Returns
-    #     -------
-    #         A list of terminal rewards.
-    #     '''
-    #
-    #     Terminal_Rewards = []
-    #     self.Environment.isTraining = False
-    #
-    #     for i in range(N_Episodes):
-    #         State = self.Environment.reset()
-    #         Done = False
-    #
-    #         while Done == False:
-    #             Action = self.Actor.Predict(State.reshape(1, self.State_Dim))
-    #             State, Reward, Done, Info = self.Environment.step(Action.reshape(-1))
-    #             if Done:
-    #                 Terminal_Rewards.append(Reward)
-    #
-    #     self.Environment.isTraining = True
-    #     return Terminal_Rewards
+        return Data
