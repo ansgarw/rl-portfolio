@@ -1,16 +1,20 @@
 import numpy as np
 import tqdm
 
+# Version IV
+#   1. Updated the neural networks to use SGD
+
 # A Neural Network, with squared loss.
 class Critic_NeuralNet:
 
-    def __init__ (self, Shape, Input_Dim, Output_Dim, Learning_Rate = 0.01, Epoch = 1, Activation = "Relu", Alpha = 0.005):
+    def __init__ (self, Shape, Input_Dim, Output_Dim, Learning_Rate = 0.01, Epoch = 1, Activation = "Relu", Alpha = 0.005, Batch_Size = 200):
         self.Weights = list()
         self.Biases  = list()
         self.Learning_Rate = Learning_Rate
         self.Output_Dim    = Output_Dim
         self.Epoch         = Epoch
         self.Alpha         = Alpha
+        self.Batch_Size    = Batch_Size
 
         if Activation == "Relu":
             self.Act   = self.Relu
@@ -26,7 +30,6 @@ class Critic_NeuralNet:
 
         self.As      = [None] * (len(self.Weights) + 1)   #Pre Sigmoid
         self.Zs      = [None] * (len(self.Weights) + 1)   #Post Sigmoid
-
 
     def Sigmoid(self, X):
         return 1.0 / (1.0 + np.exp(-X))
@@ -92,20 +95,31 @@ class Critic_NeuralNet:
 
 
     def Fit(self, X, Y):
-        for _ in range(self.Epoch):
-            self.Forward_Pass(X)
-            self.BackProp(X, Y)
+        if self.Batch_Size > 0:
+            for _ in range(self.Epoch):
+                idx = np.random.choice(X.shape[0], size = (X.shape[0] // self.Batch_Size, self.Batch_Size), replace = False)
+                for i in range(idx.shape[0]):
+                    self.Forward_Pass(X[idx[i]])
+                    self.BackProp(X[idx[i]], Y[idx[i]])
+        else:
+            for _ in range(self.Epoch):
+                self.Forward_Pass(X)
+                self.BackProp(X, Y)
 
 # A Neural Network, with custom loss function for Mu only policy gradient
 class Policy_NeuralNet:
-    def __init__ (self, Shape, Input_Dim, Output_Dim, Learning_Rate = 0.01,
-                  Epoch = 1, Activation = "Relu", Alpha = 0.0001):
+    def __init__ (self, Shape, Input_Dim, Output_Dim, Learning_Rate = 0.01, Epoch = 1, Activation = "Relu", Alpha = 0.0001, Batch_Size = 200):
+        '''
+        Set batch size to zero to disable.
+        '''
+
         self.Weights = list()
         self.Biases  = list()
         self.Learning_Rate = Learning_Rate
         self.Output_Dim    = Output_Dim
         self.Epoch         = Epoch
         self.Alpha         = Alpha
+        self.Batch_Size    = Batch_Size
 
         if Activation == "Relu":
             self.Act   = self.Relu
@@ -121,7 +135,6 @@ class Policy_NeuralNet:
 
         self.As      = [None] * (len(self.Weights) + 1)   #Pre Sigmoid
         self.Zs      = [None] * (len(self.Weights) + 1)   #Post Sigmoid
-
 
     def Sigmoid(self, X):
         return 1.0 / (1.0 + np.exp(-X))
@@ -187,9 +200,17 @@ class Policy_NeuralNet:
 
 
     def Fit(self, State, Action, Reward, Sigma):
-        for _ in range(self.Epoch):
-            self.Forward_Pass(State)
-            self.BackProp(State, Action, Reward, Sigma)
+
+        if self.Batch_Size > 0:
+            for _ in range(self.Epoch):
+                idx = np.random.choice(State.shape[0], size = (State.shape[0] // self.Batch_Size, self.Batch_Size), replace = False)
+                for i in range(idx.shape[0]):
+                    self.Forward_Pass(State[idx[i]])
+                    self.BackProp(State[idx[i]], Action[idx[i]], Reward[idx[i]], Sigma)
+        else:
+            for _ in range(self.Epoch):
+                self.Forward_Pass(State)
+                self.BackProp(State, Action, Reward, Sigma)
 
 
 class Actor_Critic:
@@ -211,13 +232,15 @@ class Actor_Critic:
                                        Learning_Rate = self.Actor_Hypers["Learning Rate"],
                                        Activation    = self.Actor_Hypers["Activation"],
                                        Epoch         = self.Actor_Hypers["Epoch"],
-                                       Alpha         = self.Actor_Hypers["Alpha"])
+                                       Alpha         = self.Actor_Hypers["Alpha"],
+                                       Batch_Size    = self.Actor_Hypers["Batch_Size"])
 
         self.Critic = Critic_NeuralNet(self.Critic_Hypers["Network Size"], self.State_Dim, 1,
                                        Learning_Rate = self.Critic_Hypers["Learning Rate"],
                                        Activation    = self.Critic_Hypers["Activation"],
                                        Epoch         = self.Critic_Hypers["Epoch"],
-                                       Alpha         = self.Critic_Hypers["Alpha"])
+                                       Alpha         = self.Critic_Hypers["Alpha"],
+                                       Batch_Size    = self.Critic_Hypers["Batch_Size"])
 
         self.Environment = Environment
 
@@ -232,7 +255,7 @@ class Actor_Critic:
             N_Episodes : The number of episodes the agent should be trained for. Note parameters like
                          sigma and learning rate decay scale with the number of episodes.
 
-            Plot       : A dictionary of plots which the function should return.
+            Plot       : A list of plots which the function should return.
                          Accepted inputs include:
                             1. Mu   : This will return a plot of the pre sigma predictions made by the agent.
                                       It will have lenght equivalent to the total number of steps in the training episodes,
@@ -244,6 +267,11 @@ class Actor_Critic:
 
                             3. Merton_Sim : A plot of the policy and value function wrt wealth. To be used only with the
                                             simulated merton environment.
+
+                            4. Merton_Benchmark : Plots the delta between the utility of the Agent vs the Merton Portfolio
+                                                  for each episode. To be used only with the historical environment.
+
+                            5. Ave_Perf : Returns the average terminal reward of the AC across 100 episodes after each refitting
 
         Returns
         -------
@@ -275,7 +303,7 @@ class Actor_Critic:
                 if 'Mu_2' in Plot : Plot_Data['Mu_2'].append(list(Leverage.flatten()))
 
                 State_1, Reward, Done, Info = self.Environment.step(Leverage[0])
-                Episode_Exp.append({"s0" : State_0, "s1" : State_1, "r" : Reward, "a" : Leverage})
+                Episode_Exp.append({"s0" : State_0, "s1" : State_1, "r" : Reward, "a" : Leverage, 'i' : Info})
                 State_0 = State_1
 
 
@@ -295,6 +323,10 @@ class Actor_Critic:
                 self.Critic.Fit(State, Reward)
 
                 Exp = []
+                if 'Ave_Perf' in Plot : Plot_Data['Ave_Perf'].append(self.Average_Performance_Plot())
+
+            # Plot per episode metrics
+            if 'Merton_Benchmark' in Plot : Plot_Data['Merton_Benchmark'].append(self.Merton_Benchmark(Episode_Exp))
 
             # Now check if any intermitant plots need to be generated:
             if np.any(i == Record_Eps):
@@ -308,6 +340,7 @@ class Actor_Critic:
         return self.Actor.Predict(X.reshape(1, self.State_Dim))
 
 
+    # Plotting Functions
     def Merton_Sim_Plot (self, i):
         Test_State = np.hstack((np.zeros((20,1)), np.linspace(0,1,20).reshape(-1,1)))
         Data = {"Policy" : self.Actor.Predict(Test_State).reshape(-1, self.Action_Dim),
@@ -315,3 +348,32 @@ class Actor_Critic:
                 "Title"  : str(i + 1) + " Eps"}
 
         return Data
+
+
+    def Merton_Benchmark (self, Episode_Exp):
+
+        # Inital wealth is the first entry to the first state
+        Intial_Wealth = Episode_Exp[0]['s0'][0]
+        Merton_Return = Intial_Wealth
+
+        for i in range(len(Episode_Exp)):
+            Merton_Return *= (1 + Episode_Exp[i]['i']['Rfree'] + Episode_Exp[i]['i']['Mkt-Rf'] * self.Environment.Training_Merton)
+
+        return Episode_Exp[-1]['r'] - self.Environment.Utility(Merton_Return)
+
+
+    def Average_Performance_Plot (self):
+        ''' Run through 100 episodes acting greedily and report the averaged terminal reward '''
+        Rewards = []
+
+        for i in range(100):
+            Done = False
+            State = self.Environment.reset()
+
+            while Done == False:
+                Action = self.Actor.Predict(State.reshape(1, self.State_Dim))
+                State, Reward, Done, Info = self.Environment.step(Action.flatten())
+
+            Rewards.append(Reward)
+
+        return np.mean(Rewards)
