@@ -1,8 +1,5 @@
 import numpy as np
-import time
 import tensorflow as tf
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 
@@ -18,7 +15,7 @@ class NN():
         for layers in Hidden:
             Hidden_Layers = tf.layers.dense(Hidden_Layers, layers, activation= self._Activation_Method, activity_regularizer= regularizer_A)  
             
-        self.Predict = tf.layers.dense(Hidden_Layers, Action_Dim, activation= tf.nn.tanh, activity_regularizer= regularizer_A)
+        self.Predict = tf.layers.dense(Hidden_Layers, Action_Dim, activation= None, activity_regularizer= regularizer_A)
         self.Sigma_Predict = tf.layers.dense(Hidden_Layers, Action_Dim, activation= tf.nn.softplus, activity_regularizer= regularizer_A)
         self.Value_Pred = tf.layers.dense(Hidden_Layers, 1, activation = None, activity_regularizer= regularizer_V)
         
@@ -66,7 +63,6 @@ class Actor_Critic:
         self.Lambda            = 0.95
         self.State_Dim         = Environment.observation_space.shape[0]
         self.Action_Dim        = Environment.action_space.shape[0]
-        self.Plot_Frequency    = 10
                 
         self.AC_Net  =  NN('AC', self.State_Dim, self.Action_Dim, 
                            Hidden      = AC_Params["Network Size"],
@@ -84,22 +80,21 @@ class Actor_Critic:
 
 
     def Train (self, N_Updates):
-        start = time.time()     # Timer to check how long each update takes
-        Exp = {}                # Save Experience in a Dictionary
-        Episode_Rewards = []    # Each Episode's experience used to calculate GAE and V_estimates
-        i = 0                   # Count how many updates have been done
-        fail = 0                # To monitor frequency of our failed experience before we obtain a success experience
-        Success_count = 0       # Every Update we require certain amount of success experiences
-        Fail_count = 0          # sum of fail to provide an overview of how each updated model perform
-        
+        Exp = {}                      # Save Experience in a Dictionary
+        Model_Average_Rewards = []    # Collect the average scores of a model and report that
+        Merton_Collect = []           # Collect the Utility of merton portfolio       
+        i = 0                         # Count how many updates have been done
+        Experience_Count = 0          # Keep track of experience number per refit
+
+        Update_Reward_Collects = []
+        Update_Merton_Collects = []      
         while i < N_Updates:
             Done = False
             Episode_Exp = []
             State_0 = self.Environment.reset()
             Sigma_Ceiling = max(self.Sigma_Range[0] - ((self.Sigma_Range[0] - self.Sigma_Range[1]) * (i / (self.Sigma_Anneal * N_Updates))), self.Sigma_Range[1])
-            Sigma_Floor = max(Sigma_Ceiling/2, self.Sigma_Range[1])
+            Sigma_Floor = self.Sigma_Range[1]
             self.Learning_Rate = self.Base_LR * Sigma_Ceiling
-#            self.Sigma = Sigma_Ceiling
             local_R = 0
             while Done == False:
                 if i ==0:
@@ -109,7 +104,6 @@ class Actor_Critic:
                     Mu = self.TF_Session.run(self.AC_Net.Predict, feed_dict = {self.AC_Net.X: State_0.reshape(-1, self.State_Dim)})
                     s = self.TF_Session.run(self.AC_Net.Sigma_Predict, feed_dict = {self.AC_Net.X: State_0.reshape(-1, self.State_Dim)})
                     
-                    Mu = np.clip(Mu, -1, 1)
                     s = np.clip(s, Sigma_Floor, Sigma_Ceiling)
                     Leverage = np.random.normal(Mu, s)
                 try:
@@ -117,40 +111,27 @@ class Actor_Critic:
                 except:
                     raise Exception('Invalid Leverage {} and Mu {}'.format(Leverage[0], Mu))
 
-                Episode_Exp.append([State_0, Leverage, Reward, Done, State_1, s])
+                Episode_Exp.append([State_0, Leverage, Reward, Done, State_1, s, Info])
                 State_0 = State_1
                 local_R += Reward
 
-            if Reward >0:
-                Exp = self.Record_Exp(Episode_Exp, Exp)
-                Success_count += 1
-                if Success_count % self.Plot_Frequency == 0 and Success_count!=0:
-                    print('Episode {} of Model Version {} has reward {} after {} fails'.format(Success_count, i, local_R, Fail_count))
-                    Fail_count = 0
-                    Episode_Rewards.append(local_R)
-                    
-                Fail_count += fail
-                fail = 0
-                
-                if Success_count == self.Retrain_Frequency:
-                    print('Updating to Model Version {}...'.format(i+1))
-                    Success_count  = 0
-                    i+= 1        
-                    self.Fit_Model(self.Epoch, Exp)
-                    Exp = {}
-                    t = time.time() - start
-                    print('Update to Version {} has taken {} seconds'.format(i, t))
-                    start = time.time()
-                    
-                    if i % 2 == 0 and i!=0:
-                        self.Print_V_Function()
-                        self.Print_Action_Space()
-            else:
-                if fail < 1:
-                    Exp = self.Record_Exp(Episode_Exp, Exp)
-                fail += 1
-
-        return Episode_Rewards
+            Exp = self.Record_Exp(Episode_Exp, Exp)
+            Update_Reward_Collects.append(local_R)
+            Update_Merton_Collects.append(self.Merton_Benchmark(Episode_Exp))
+            Experience_Count += 1
+            
+            if Experience_Count == self.Retrain_Frequency:
+#                print('Updating to Model Version {}...'.format(i+1))
+                Experience_Count  = 0
+                i+= 1        
+                Model_Average_Rewards.append(sum(Update_Reward_Collects)/len(Update_Reward_Collects))
+                Merton_Collect.append(sum(Update_Merton_Collects)/len(Update_Merton_Collects))
+                self.Fit_Model(self.Epoch, Exp)
+                Exp = {}
+                Update_Reward_Collects = []
+                Update_Merton_Collects = []     
+            
+        return Model_Average_Rewards, Merton_Collect
     
     
     def Record_Exp(self, Episode_Exp, Rec_dictionary):
@@ -196,64 +177,23 @@ class Actor_Critic:
             self.TF_Session.run(self.AC_Net.fit, feed_dict = {self.AC_Net.X:Exp['States'][ind[k],:], self.AC_Net.A_in:Exp['Actions'][ind[k],:], self.AC_Net.V_in:Exp['V_Estimate'][ind[k],:],
                             self.AC_Net.sigma_in: Exp['Sig'][ind[k],:], self.AC_Net.Adv:Exp['Advantage'][ind[k],:], self.AC_Net.learning_rate:self.Learning_Rate})    
     
-    def Decide_Move(self, state, Sigma):
+    def Predict_Action(self, state):
         Mu = self.TF_Session.run(self.AC_Net.Predict, feed_dict = {self.AC_Net.X: state.reshape(-1, self.State_Dim)})
+        Sigma = self.TF_Session.run(self.AC_Net.Sigma_Predict, feed_dict = {self.AC_Net.X: state.reshape(-1, self.State_Dim)})
+
         return np.random.normal(Mu, Sigma)
-    
-    
-   # Auxillary Functions
-    def Print_V_Function (self):
-        V_Function = []
-
-        dx = (self.Environment.observation_space.high[0] - self.Environment.observation_space.low[0]) / 50
-        dy = (self.Environment.observation_space.high[1] - self.Environment.observation_space.low[1]) / 50
-
-        x_low = self.Environment.observation_space.low[0]
-        y_low = self.Environment.observation_space.low[1]
-
-        for i in range(50):
-            for j in range(50):
-                State = np.array([x_low + dx * i, y_low + dy * j]).reshape((-1,self.State_Dim))
-                Value = self.TF_Session.run(self.AC_Net.Value_Pred, feed_dict = {self.AC_Net.X: State})
-                V_Function.append([x_low + i * dx, y_low + j * dy, Value[0][0]])
-        V_Function = np.array(V_Function)
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        ax.scatter(V_Function[:,0], V_Function[:,1], V_Function[:,2], zdir='z', c= 'red')
-        plt.show()    
-    
-    
-    def Print_Action_Space (self):
-         A_Function = []
-    
-         dx = (self.Environment.observation_space.high[0] - self.Environment.observation_space.low[0]) / 50
-         dy = (self.Environment.observation_space.high[1] - self.Environment.observation_space.low[1]) / 50
-    
-         x_low = self.Environment.observation_space.low[0]
-         y_low = self.Environment.observation_space.low[1]
-    
-         for i in range(50):
-             for j in range(50):
-                 State = np.array([x_low + dx * i, y_low + dy * j]).reshape(-1,self.State_Dim)
-                 Action = self.TF_Session.run(self.AC_Net.Predict, feed_dict = {self.AC_Net.X: State})
-                 A_Function.append([x_low + i * dx, y_low + j * dy, Action[0][0]])
-                 
-         A_Function = np.array(A_Function)
-         fig = plt.figure()
-         ax = fig.add_subplot(111, projection='3d')
-         ax.scatter(A_Function[:,0], A_Function[:,1], A_Function[:,2], zdir='z', c= 'red')
-         plt.show()
-    
-    
-        
-    
-    
-    
-    
-    
 
     
-    
+    def Merton_Benchmark (self, Episode_Exp):
+        # Inital wealth is the first entry to the first state
+        Intial_Wealth = Episode_Exp[0][0][0]
+        Merton_Return = Intial_Wealth
+
+        for i in range(len(Episode_Exp)):
+            Merton_Return *= (1 + Episode_Exp[i][6]['Rfree'] + Episode_Exp[i][6]['Mkt-Rf'] * self.Environment.Training_Merton)
+
+        return self.Environment.Utility(Merton_Return)
+
     
     
 
