@@ -5,8 +5,9 @@ import gym
 import os
 
 # Global "Constants"
-_Daily_Filename   = os.path.realpath(__file__).replace("Historical.py", "PredictorDataDaily.csv")
-_Monthly_Filename = os.path.realpath(__file__).replace("Historical.py", "PredictorDataMonthly.csv")
+_Daily_Filename      = os.path.realpath(__file__).replace("Historical.py", "PredictorDataDaily.csv")
+_Monthly_Filename    = os.path.realpath(__file__).replace("Historical.py", "PredictorDataMonthly.csv")
+_Monthly_Filename_V2 = os.path.realpath(__file__).replace("Historical.py", "Monthly_Data.csv")
 
 class HistoricalEnv(gym.Env):
 
@@ -27,7 +28,7 @@ class HistoricalEnv(gym.Env):
             1. The environment must be reset after initialisation (by calling myEnv.reset())
         '''
 
-        assert kwargs['Time_Step'] in ("Daily", "Monthly"), "Episode_Length % not recognised, Please input Daily or Monthly"
+        assert kwargs['Time_Step'] in ("Daily", "Monthly", "Monthly-v1"), "Episode_Length % not recognised, Please input Daily or Monthly"
 
         self.Time_Step       = kwargs['Time_Step']
         self.Risk_Aversion   = kwargs['Risk_Aversion']
@@ -75,6 +76,19 @@ class HistoricalEnv(gym.Env):
             self.Y.remove("Unnamed: 2")
             self.Rf = "Rfree"
 
+        elif self.Time_Step == 'Monthly-v1':
+            self.Data = pd.read_csv(_Monthly_Filename_V2)
+
+            self.Y = ['D12', 'E12', 'Rfree', 'DY', 'EY', 'DP', 'DE', 'svar', 'infl', 'AAA', 'BAA', 'lty', 'defaultspread', 'tbl',
+                      'b/m', 'ntis', 'ltr', 'corpr', 'CRSP_SPvw', 'CRSP_SPvwx', 'Mom']
+            self.Data = self.Data[self.Y + ['Return']]
+            self.Data = self.Data.dropna()
+            self.Data = self.Data.reset_index(drop = True)
+            self.Data['Mkt_Ret'] = self.Data['Return'] - self.Data['Rfree']
+            self.X = "Mkt_Ret"
+            self.Rf = "Rfree"
+
+
         # Plus two as wealth and tau are also part of the state space.
         self.observation_space = gym.spaces.Box(low = np.array([-np.inf] * (len(self.Y) + 2)), high = np.array([np.inf] * (len(self.Y) + 2)), dtype = np.float32)
         self.Reset_Validation_Data()
@@ -87,10 +101,31 @@ class HistoricalEnv(gym.Env):
 
         Parameters
         ----------
-            Episode_Length : The length of an episode, measured in Time_Step(s)
-            Risk_Aversion  : The risk aversion of the agent
-            Max_Leverage   : The maximum leverage that the bot may take without triggering an error
-            Min_Leverage   : THe minimum leverage that the bot may take without triggering an error
+            Episode_Length      : The length of an episode, measured in Time_Step(s)
+            Risk_Aversion       : The risk aversion of the agent
+            Max_Leverage        : The maximum leverage that the bot may take without triggering an error
+            Min_Leverage        : The minimum leverage that the bot may take without triggering an error
+            Validation_Frac     : The holdout fraction of the dataset.
+            Intermediate_Reward : A flag to indicate whether the environment should return inter-episode rewards.
+            State_Parameters    : A list of the parameters to be used to construct the state.
+
+        State_Parameters
+        ----------------
+            Below is a list of the available state parameters in the Monthly-v1 version, and the date from which they
+            become available. NaNs are dropped automatically, however pay attention to starting date to ensure the
+            amount of available data is not reduced too sevearly.
+
+            1871-01 : ['D12', 'E12', 'Rfree', 'DY', 'EY', 'DP', 'DE']
+            1885-02 : ['svar']
+            1920-02 : ['infl', 'AAA', 'BAA', 'lty', 'defaultspread', 'tbl']
+            1927-01 : ['b/m', 'ntis', 'ltr', 'corpr', 'CRSP_SPvw', 'CRSP_SPvwx', 'Mom']
+            1930-12 : ['BAB']
+            1937-05 : ['csp']
+            1947-01 : ['CPIAUCSL']
+            1963-07 : ['SMB', 'HML', 'RMW', 'CMA']
+            1982-01 : ['Term spread']
+
+            Data ends 2019.
 
         '''
 
@@ -101,7 +136,18 @@ class HistoricalEnv(gym.Env):
         self.Validation_Frac     = kwargs['Validation_Frac']     if 'Validation_Frac'     in kwargs.keys() else self.Validation_Frac
         self.Intermediate_Reward = kwargs['Intermediate_Reward'] if 'Intermediate_Reward' in kwargs.keys() else self.Intermediate_Reward
 
+        if self.Time_Step == 'Monthly-v1' and 'State_Parameters' in kwargs.keys():
+            self.Y = kwargs['State_Parameters']
+
+            self.Data = pd.read_csv(_Monthly_Filename_V2)
+            self.Data = self.Data[self.Y + ['Return']]
+            self.Data.dropna()
+            self.Data = self.Data.reset_index(drop = True)
+            self.Data['Return'] = self.Data['Return'] - self.Data['Rfree']
+
+
         self.action_space = gym.spaces.Box(low = self.Min_Leverage, high = self.Max_Leverage, shape = (1,), dtype = np.float32)
+        self.observation_space = gym.spaces.Box(low = np.array([-np.inf] * (len(self.Y) + 2)), high = np.array([np.inf] * (len(self.Y) + 2)), dtype = np.float32)
 
 
         for key in kwargs.keys():
@@ -238,7 +284,7 @@ class HistoricalEnv(gym.Env):
 
         if self.Time_Step == 'Daily':
             Info['Rfree'] = self.Data.iloc[self.Index]['Risk-Free Rate']
-        elif self.Time_Step == 'Monthly':
+        elif self.Time_Step == 'Monthly' or self.Time_Step == 'Monthly-v1':
             Info['Rfree'] = self.Data.iloc[self.Index]['Rfree']
 
         return Info

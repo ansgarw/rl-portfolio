@@ -26,3 +26,10 @@ register(id = 'Historical_Monthly-v0', entry_point = 'Portfolio_Gym.envs:Histori
                                                                                                    'Max_Leverage'    : 10,
                                                                                                    'Min_Leverage'    : 10,
                                                                                                    'Validation_Frac' : 0.3},)
+
+register(id = 'Historical_Monthly-v1', entry_point = 'Portfolio_Gym.envs:HistoricalEnv', kwargs = {'Risk_Aversion'   : 1,
+                                                                                                   'Time_Step'       : "Monthly-v1",
+                                                                                                   'Episode_Length'  : 12,
+                                                                                                   'Max_Leverage'    : 10,
+                                                                                                   'Min_Leverage'    : 10,
+                                                                                                   'Validation_Frac' : 0.3},)
