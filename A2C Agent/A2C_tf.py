@@ -64,8 +64,8 @@ class Actor_Critic:
         self.Sigma_Anneal      = Sigma_Anneal
         self.Gamma             = Gamma
         self.Lambda            = 0.95
-        self.State_Dim         = len(Environment.reset())
-        self.Action_Dim        = len(Environment.action_space.sample())
+        self.State_Dim         = Environment.observation_space.shape[0]
+        self.Action_Dim        = Environment.action_space.shape[0]
         self.Plot_Frequency    = 10
                 
         self.AC_Net  =  NN('AC', self.State_Dim, self.Action_Dim, 
