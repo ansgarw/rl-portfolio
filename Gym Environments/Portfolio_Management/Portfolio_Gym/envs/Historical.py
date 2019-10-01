@@ -178,6 +178,8 @@ class HistoricalEnv(gym.Env):
         Vars = np.var(np.append(self.Data.iloc[0:self.Validation_Start][self.X].values, self.Data.iloc[self.Validation_End::][self.X].values))
 
         self.Training_Merton = Mean / (Vars * self.Risk_Aversion)
+        self.Training_Var    = Vars
+        self.Training_Mean   = Mean
 
 
     def reset (self):
