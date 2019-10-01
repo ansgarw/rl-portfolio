@@ -121,7 +121,7 @@ class Actor_Critic:
             Experience_Count += 1
             
             if Experience_Count == self.Retrain_Frequency:
-#                print('Updating to Model Version {}...'.format(i+1))
+                print('Updating to Model Version {}...'.format(i+1))
                 Experience_Count  = 0
                 i+= 1        
                 Model_Average_Rewards.append(sum(Update_Reward_Collects)/len(Update_Reward_Collects))
