@@ -257,22 +257,35 @@ class Actor_Critic:
 
             Plot       : A list of plots which the function should return.
                          Accepted inputs include:
-                            1. Mu   : This will return a plot of the pre sigma predictions made by the agent.
-                                      It will have lenght equivalent to the total number of steps in the training episodes,
-                                      and will have the same dimensions as the actionspace.
+                            1. Mu                    : This will return a plot of the pre sigma predictions made by the agent.
+                                                       It will have lenght equivalent to the total number of steps in the
+                                                       training episodes, and will have the same dimensions as the actionspace.
 
-                            2. Mu_2 : This will return a plot of the post sigma predictions produced by the agent.
-                                      It will have lenght equivalent to the total number of steps in the training episodes,
-                                      and will have the same dimensions as the actionspace.
+                            2. Mu_2                  : This will return a plot of the post sigma predictions produced by the agent.
+                                                       It will have lenght equivalent to the total number of steps in the training
+                                                       episodes, and will have the same dimensions as the actionspace.
 
-                            3. Merton_Sim : A plot of the policy and value function wrt wealth. To be used only with the
-                                            simulated merton environment.
+                            3. Merton_Sim            : A plot of the policy and value function wrt wealth. To be used only with
+                                                       the simulated merton environment.
 
-                            4. Merton_Benchmark : Plots the delta between the utility of the Agent vs the Merton Portfolio
-                                                  for each episode. To be used only with the historical environment.
+                            4. Merton_Benchmark      : Plots the delta between the utility of the Agent vs the Merton Portfolio
+                                                       for each episode. To be used only with the historical environment.
 
-                            5. Ave_Perf : Returns the average terminal reward of the AC across 100 episodes after each refitting
+                            5. Greedy_Merton         : Plot the average utility of both the Merton Portfolio and the DQN across 100
+                                                       episodes (from the training dataset) acting greedily
 
+
+                            6. Ave_Perf              : Returns the average terminal reward of the AC across 100 episodes after
+                                                       each refitting
+
+                            7. Percent_Merton_Action : Returns the fraction of actions recomended by the actor which are within
+                                                       10% of the merton portfolio action.
+
+                            8. R_Squared             : The optimal action independent of the state parameters is to hold the
+                                                       Merton Portfolio, hence any deviation from holding this portfolio may
+                                                       be interperated as the expectation of excess return across the next period.
+                                                       Thus assuming the moments of the asset to be constant the expected return
+                                                       across the next period may be calculated, and an R-Squared generated.
         Returns
         -------
             A dictionary with the same keys as Plot, which contains the requested plotting data.
@@ -303,7 +316,7 @@ class Actor_Critic:
                 if 'Mu_2' in Plot : Plot_Data['Mu_2'].append(list(Leverage.flatten()))
 
                 State_1, Reward, Done, Info = self.Environment.step(Leverage[0])
-                Episode_Exp.append({"s0" : State_0, "s1" : State_1, "r" : Reward, "a" : Leverage, 'i' : Info})
+                Episode_Exp.append({"s0" : State_0, "s1" : State_1, "r" : Reward, "a" : Leverage, 'i' : Info, 'Mu' : Mu.flatten()})
                 State_0 = State_1
 
 
@@ -322,8 +335,12 @@ class Actor_Critic:
                 self.Actor.Fit(State, Action, Advantage, Sigma)
                 self.Critic.Fit(State, Reward)
 
-                Exp = []
                 if 'Ave_Perf' in Plot : Plot_Data['Ave_Perf'].append(self.Average_Performance_Plot())
+                if 'Percent_Merton_Action' in Plot : Plot_Data['Percent_Merton_Action'].append(self.Percent_Merton_Action(Exp))
+                if 'R_Squared' in Plot : Plot_Data['R_Squared'].append(self.R_Squared(Exp))
+                if 'Greedy_Merton' in Plot : Plot_Data['Greedy_Merton'].append(self.Merton_Benchmark_Two())
+
+                Exp = []
 
             # Plot per episode metrics
             if 'Merton_Benchmark' in Plot : Plot_Data['Merton_Benchmark'].append(self.Merton_Benchmark(Episode_Exp))
@@ -349,7 +366,6 @@ class Actor_Critic:
 
         return Data
 
-
     def Merton_Benchmark (self, Episode_Exp):
 
         # Inital wealth is the first entry to the first state
@@ -361,6 +377,60 @@ class Actor_Critic:
 
         return Episode_Exp[-1]['r'] - self.Environment.Utility(Merton_Return)
 
+    def Merton_Benchmark_Two (self):
+        '''
+        Assess the performance of N episodes against the merton portfolio, acting optimally.
+
+        Returns
+        -------
+        A list of two floats:
+            0. The Average utility across 100 episodes of the DQN
+            1. The Average utility across 100 episodes of the Merton Portfolio
+
+        '''
+        results = {'AC'    : [],
+                   'Merton' : []}
+
+        for i in range(100):
+            Done = False
+            Merton_Wealth = 1.0
+            State = self.Environment.reset()
+            self.Environment.Wealth = 1
+
+            while Done == False:
+                Action = self.Actor.Predict(State.reshape(1, self.State_Dim))
+                State, Reward, Done, Info = self.Environment.step(Action.flatten())
+                Merton_Wealth *= (1 + Info['Rfree'] + Info['Mkt-Rf'] * self.Environment.Training_Merton)
+
+            results['AC'].append(Reward)
+            results['Merton'].append(self.Environment.Utility(Merton_Wealth))
+
+        return [np.mean(results['AC']), np.mean(results['Merton'])]
+
+    def Percent_Merton_Action (self, Exp):
+        ''' Returns the percentage of the actions which are within 10% of the merton fraction '''
+        Count = 0
+
+        for exp in Exp:
+            if exp['a'][0][0] > self.Environment.Training_Merton * 0.9 and exp['a'][0][0] < self.Environment.Training_Merton * 1.1:
+                Count += 1
+
+        return (Count / len(Exp)) * 100
+
+    def R_Squared (self, Exp):
+        ''' Returns the R squared of return predictions extraced from actions (only works with hist data.) '''
+
+        Y_hat = []
+        Y = []
+
+        for exp in Exp:
+            Y_hat.append(exp['Mu'][0] * self.Environment.Training_Var * self.Environment.Risk_Aversion)
+            Y.append(exp['i']['Mkt-Rf'])
+
+        Y_hat = np.array(Y_hat)
+        Y = np.array(Y)
+
+        return  1 - (np.sum((Y - Y_hat) ** 2) / np.sum((Y - np.mean(Y)) ** 2))
 
     def Average_Performance_Plot (self):
         ''' Run through 100 episodes acting greedily and report the averaged terminal reward '''
@@ -377,3 +447,8 @@ class Actor_Critic:
             Rewards.append(Reward)
 
         return np.mean(Rewards)
+
+
+
+def Genrate_Plots (Plot_Data):
+    pass

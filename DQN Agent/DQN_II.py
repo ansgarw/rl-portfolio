@@ -1,12 +1,15 @@
-import multiprocessing   as mp
 import numpy             as np
 import math
 import copy
+import tqdm
+
+# Version II
+#   - Non-Asyncronous to allow for per-episode plots. Also Async is not benefitial with portfolio gym as it is very fast.
 
 # A multiheaded Nerual Network with added fucntionality which allows it to train
 # towards a single head at a time.
 class NeuralNet:
-    def __init__ (self, Shape, Input_Dim, Output_Dim, Learning_Rate = 0.01, Epoch = 1, Activation = "Relu", Alpha = 0.005):
+    def __init__ (self, Shape, Input_Dim, Output_Dim, Learning_Rate = 0.01, Epoch = 1, Activation = "Relu", Alpha = 0.005, Batch_Size = 200):
         '''
         Parameters
         ----------
@@ -19,6 +22,7 @@ class NeuralNet:
                             Acceptable agruments include ("Relu", "Sigmoid")
             Alpha         : An L2 regularization term, pass higher values to increase the penalisation applied to the network
                             for assinging high weights, and hopefully reduce overfitting.
+            Batch_Size    : The size of a batch when applying SGD solver algorithm. Set to 0 to not use SGD.
         '''
 
         self.Weights = list()
@@ -27,6 +31,7 @@ class NeuralNet:
         self.Output_Dim    = Output_Dim
         self.Epoch         = Epoch
         self.Alpha         = Alpha
+        self.Batch_Size    = Batch_Size
 
         if Activation == "Relu":
             self.Act   = self.Relu
@@ -173,61 +178,25 @@ class NeuralNet:
             Z : A numpy column vector of ints in which the Nth entry represents the index of
                 the head of the network which should be trained for the Nth oberservation.
         '''
-        for _ in range(self.Epoch):
-            self.Forward_Pass(X)
-            self.BackProp(X, Y, Z)
 
+        if self.Batch_Size > 0:
+            for _ in range(self.Epoch):
+                idx = np.random.choice(X.shape[0], size = (X.shape[0] // self.Batch_Size, self.Batch_Size), replace = False)
+                for i in range(idx.shape[0]):
+                    self.Forward_Pass(X[idx[i]])
+                    self.BackProp(X[idx[i]], Y[idx[i]], Z[idx[i]])
 
+        else:
+            for _ in range(self.Epoch):
+                self.Forward_Pass(X)
+                self.BackProp(X, Y, Z)
 
-def Train_Async (Async_Args):
-    '''
-    A function which may be called by pool.map to source experiance asyncronously.
-
-    Parameters
-    ----------
-        Async_Args : A dictionary of the required information, as pool.map facilitates only one argument.
-                     The required keys include:
-                       "Environment"         : A copy of the gym environment
-                       "Seed"                : An integer used to seed the random number generation for this process.
-                       "Epsilon"             : A list of pre-computed epsilons.
-                       "Episodes_Per_Thread" : The number of episodes the worker needs to process.
-                       "Action_Dim"          : The size of the action_space.
-                       "Action_Space"        : A numpy array of the actual actions which may be taken.
-                       "State_Dim"           : The size of the state_space.
-                       "Network"             : The internal Q network, used for greedy actions.
-
-
-    Notes
-    -----
-        This function must not be part of the DQN class, as if it is the entire class gets copied
-        to each process, and since the class experiance database gets large, this has a sigificant overhead.
-    '''
-
-    np.random.seed(Async_Args['Seed'])
-    Local_Exp = []
-
-    for i in range(Async_Args['Episodes_Per_Thread']):
-
-        State_0 = Async_Args['Environment'].reset()
-        Done = False
-
-        while Done == False:
-            if np.random.uniform() > Async_Args['Epsilon'][i]:
-                Action_idx = np.random.choice(list(range(Async_Args['Action_Dim'])))
-            else:
-                Action_idx = np.argmax(Async_Args['Network'].Predict(State_0.reshape(1, Async_Args['State_Dim'])))
-
-            State_1, Reward, Done, Info = Async_Args['Environment'].step(Async_Args['Action_Space'][Action_idx])
-            Local_Exp.append({"s0" : State_0, "s1" : State_1, "r" : Reward, "a" : Action_idx, "done" : Done})
-            State_0 = State_1
-
-    return Local_Exp
 
 
 # The DQN Agent itself.
 class DQN:
 
-    def __init__ (self, Environment, Action_Dim, Network_Params, Gamma = 0.99, Batch_Size = 512, Epsilon_Range = [1, 0.1], Epsilon_Anneal = 0.1, Retrain_Frequency = 100, Async_Enabled = False):
+    def __init__ (self, Environment, Action_Dim, Network_Params, Gamma = 0.99, Batch_Size = 512, Epsilon_Range = [1, 0.1], Epsilon_Anneal = 0.1, Retrain_Frequency = 100):
         '''
         Parameters
         ----------
@@ -246,14 +215,7 @@ class DQN:
             Epsilon_Anneal    : The fraction of the training sequence which should have passed for epsilon to fall from its starting
                                 value to its terminal value.
             Retrain_Frequency : The frequency at which the internal network is refitted (Measured in episode.)
-            Async_Enabled     : A flag indicating if Asyncronous computation should be used.
 
-            Notes
-            -----
-                As it truns out the Simulated environment with only 12 steps runs very quickly, and hence using
-                async has very little effect unless the retrain frequency is greater than 3000 * the number of CPU cores.
-
-                If this agent is used in a slower environment then the benefit of Async will become much more apparent.
         '''
 
         self.Environment = Environment
@@ -267,10 +229,6 @@ class DQN:
         self.Gamma             = Gamma
         self.Batch_Size        = Batch_Size
         self.Network_Params    = Network_Params
-        self.Async_Enabled     = Async_Enabled
-
-        self.Episodes_Per_Thread = math.ceil(self.Retrain_Frequency / mp.cpu_count())
-        self.Retrain_Frequency   = self.Episodes_Per_Thread * mp.cpu_count()
 
 
 
@@ -278,12 +236,13 @@ class DQN:
                                    Learning_Rate = self.Network_Params["Learning Rate"],
                                    Activation    = self.Network_Params["Activation"],
                                    Epoch         = self.Network_Params["Epoch"],
-                                   Alpha         = self.Network_Params["Alpha"])
+                                   Alpha         = self.Network_Params["Alpha"],
+                                   Batch_Size    = self.Network_Params["Batch_Size"])
 
         self.Exp = []
 
 
-    def Train (self, N_Episodes):
+    def Train (self, N_Episodes, Plot = []):
 
         '''
         Trains the agent
@@ -292,6 +251,15 @@ class DQN:
         ----------
             N_Episodes : The number of episodes to train the DQN Agent across.
 
+            Plot       : A list of keywords indicating the plottable metrics which should be returned.
+                         Accepted inputs include:
+                            1. Merton_Benchmark : Plots the delta between the utility of the Agent vs the Merton Portfolio
+                                                  for each episode. To be used only with the historical environment.
+                            2. Greedy_Merton    : Plot the average utility of both the Merton Portfolio and the DQN across 100
+                                                  episodes (from the training dataset) acting greedily
+                            3. Ave_Perf         : Calculates the average terminal reward across 100 episodes after each fitting
+                                                  of the neural network.
+
         Notes
         -----
             Since the DQN learns off policy there should be no negative effects of calling Train() multiple times in series on
@@ -299,57 +267,40 @@ class DQN:
             optimally across the training sequence. (Epsilon will jump back to its inital value in subsequent calls to this function).
         '''
 
-        N_Trains = math.ceil(N_Episodes / self.Retrain_Frequency)
-        N_Episodes = N_Trains * self.Retrain_Frequency
+        Plot_Data = {}
+        for key in Plot:
+            Plot_Data[key] = []
+
         epsilons = self.Epsilon_Range[0] * np.ones(N_Episodes) - (1 / self.Epsilon_Anneal) * np.arange(0, N_Episodes) * (self.Epsilon_Range[0] - self.Epsilon_Range[1])
         epsilons = np.maximum(epsilons, self.Epsilon_Range[1])
 
 
-        if (self.Async_Enabled):
-            Seeds = np.random.randint(low = 0, high = 2**30, size = N_Trains * mp.cpu_count())
+        for i in tqdm.tqdm(range(N_Episodes)):
 
+            State_0 = self.Environment.reset()
+            Done = False
+            Episode_Exp = []
 
-        for i in range(N_Trains):
-            if (self.Async_Enabled):
-                Async_Input = []
-                for j in range(mp.cpu_count()):
-                    eps = epsilons[i * mp.cpu_count() * self.Episodes_Per_Thread : i * mp.cpu_count() * self.Episodes_Per_Thread + (j + 1) * self.Episodes_Per_Thread]
-                    Worker_Info = {"Environment"         : copy.deepcopy(self.Environment),
-                                   "Seed"                : Seeds[i * mp.cpu_count() + j],
-                                   "Epsilon"             : eps,
-                                   "Episodes_Per_Thread" : self.Episodes_Per_Thread,
-                                   "Action_Dim"          : self.Action_Dim,
-                                   "Action_Space"        : self.Action_Space,
-                                   "State_Dim"           : self.State_Dim,
-                                   "Network"             : self.Q_Network}
-                    Async_Input.append(Worker_Info)
-                    # Async_Input.append([copy.deepcopy(self.Environment), Seeds[i * mp.cpu_count() + j], eps])
+            while Done == False:
+                if np.random.uniform() > epsilons[i]:
+                    Action_idx = np.random.choice(list(range(self.Action_Dim)))
+                else:
+                    Action_idx = np.argmax(self.Q_Network.Predict(State_0.reshape(1, self.State_Dim)))
 
-                with mp.Pool(mp.cpu_count()) as pool:
-                    Experiance = pool.map(Train_Async, Async_Input)
+                State_1, Reward, Done, Info = self.Environment.step(self.Action_Space[Action_idx])
+                Episode_Exp.append({"s0" : State_0, "s1" : State_1, "r" : Reward, "a" : Action_idx, "i" : Info, "done" : Done})
+                State_0 = State_1
 
-                for j in range(len(Experiance)):
-                    self.Exp.extend(Experiance[j])
+            self.Exp.extend(Episode_Exp)
+            if len(self.Exp) > 1e6:
+                self.Exp[0:len(Episode_Exp)] = []
 
-            else:
-                for j in range(self.Retrain_Frequency):
-
-                    State_0 = self.Environment.reset()
-                    Done = False
-
-                    while Done == False:
-                        if np.random.uniform() > epsilons[i * self.Retrain_Frequency + j]:
-                            Action_idx = np.random.choice(list(range(self.Action_Dim)))
-                        else:
-                            Action_idx = np.argmax(self.Q_Network.Predict(State_0.reshape(1, self.State_Dim)))
-
-                        State_1, Reward, Done, Info = self.Environment.step(self.Action_Space[Action_idx])
-                        self.Exp.append({"s0" : State_0, "s1" : State_1, "r" : Reward, "a" : Action_idx, "done" : Done})
-                        State_0 = State_1
+            # Plot per episode metrics
+            if 'Merton_Benchmark' in Plot : Plot_Data['Merton_Benchmark'].append(self.Merton_Benchmark(Episode_Exp))
 
 
             # Refit the model
-            if len(self.Exp) > self.Batch_Size:
+            if i % self.Retrain_Frequency == 0 and len(self.Exp) > self.Batch_Size:
                 Data = np.random.choice(self.Exp, size = self.Batch_Size, replace = False)
                 X  = np.array([d['s0'] for d in Data]).reshape((-1, self.State_Dim))
                 Y  = np.array([d['r']  for d in Data])
@@ -365,6 +316,11 @@ class DQN:
 
                 self.Q_Network.Fit(X, Y, Z)
 
+                if 'Ave_Perf' in Plot : Plot_Data['Ave_Perf'].append(self.Average_Performance_Plot())
+                if 'Greedy_Merton' in Plot : Plot_Data['Greedy_Merton'].append(self.Merton_Benchmark_Two())
+
+        return Plot_Data
+
 
     def Predict_Q (self, X):
         ''' A simple pedict fucntion to extract predictions from the agent without having to call methods on the internal network '''
@@ -372,5 +328,71 @@ class DQN:
 
 
     def Predict_Action(self, X):
-        ''' returns the optimal action per the Q Network '''
+        ''' Returns the optimal action per the Q Network '''
         return self.Action_Space[np.argmax(self.Q_Network.Predict(X), axis = 1)]
+
+
+    # Plotting Functions
+    def Merton_Benchmark (self, Episode_Exp):
+        '''
+        Returns the difference between the Utility of the agent and the utility of
+        investing in the merton portfolio calculated across the training dataset.
+        '''
+
+        # Inital wealth is the first entry to the first state
+        Intial_Wealth = Episode_Exp[0]['s0'][0]
+        Merton_Return = Intial_Wealth
+
+        for i in range(len(Episode_Exp)):
+            Merton_Return *= (1 + Episode_Exp[i]['i']['Rfree'] + Episode_Exp[i]['i']['Mkt-Rf'] * self.Environment.Training_Merton)
+
+        return Episode_Exp[-1]['r'] - self.Environment.Utility(Merton_Return)
+
+
+    def Merton_Benchmark_Two (self):
+        '''
+        Assess the performance of N episodes against the merton portfolio, acting optimally.
+
+        Returns
+        -------
+        A list of two floats:
+            0. The Average utility across 100 episodes of the DQN
+            1. The Average utility across 100 episodes of the Merton Portfolio
+
+        '''
+        results = {'DQN'    : [],
+                   'Merton' : []}
+
+        for i in range(100):
+            Done = False
+            Merton_Wealth = 1.0
+            State = self.Environment.reset()
+            self.Environment.Wealth = 1
+
+            while Done == False:
+                Action_idx = np.argmax(self.Q_Network.Predict(State.reshape(1, self.State_Dim)))
+                State, Reward, Done, Info = self.Environment.step(self.Action_Space[Action_idx])
+                Merton_Wealth *= (1 + Info['Rfree'] + Info['Mkt-Rf'] * self.Environment.Training_Merton)
+
+            results['DQN'].append(Reward)
+            results['Merton'].append(self.Environment.Utility(Merton_Wealth))
+
+        return [np.mean(results['DQN']), np.mean(results['Merton'])]
+
+
+    def Average_Performance_Plot (self):
+        ''' Run through 100 episodes acting greedily and report the averaged terminal reward '''
+        Rewards = []
+
+        for i in range(100):
+            Done = False
+            State = self.Environment.reset()
+            self.Environment.Wealth = 1
+
+            while Done == False:
+                Action_idx = np.argmax(self.Q_Network.Predict(State.reshape(1, self.State_Dim)))
+                State, Reward, Done, Info = self.Environment.step(self.Action_Space[Action_idx])
+
+            Rewards.append(Reward)
+
+        return np.mean(Rewards)

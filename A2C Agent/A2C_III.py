@@ -232,7 +232,7 @@ class Actor_Critic:
             N_Episodes : The number of episodes the agent should be trained for. Note parameters like
                          sigma and learning rate decay scale with the number of episodes.
 
-            Plot       : A dictionary of plots which the function should return.
+            Plot       : A list of plots which the function should return.
                          Accepted inputs include:
                             1. Mu   : This will return a plot of the pre sigma predictions made by the agent.
                                       It will have lenght equivalent to the total number of steps in the training episodes,
@@ -244,6 +244,11 @@ class Actor_Critic:
 
                             3. Merton_Sim : A plot of the policy and value function wrt wealth. To be used only with the
                                             simulated merton environment.
+
+                            4. Merton_Benchmark : Plots the delta between the utility of the Agent vs the Merton Portfolio
+                                                  for each episode. To be used only with the historical environment.
+
+                            5. Ave_Perf : Returns the average terminal reward of the AC across 100 episodes after each refitting
 
         Returns
         -------
@@ -275,7 +280,7 @@ class Actor_Critic:
                 if 'Mu_2' in Plot : Plot_Data['Mu_2'].append(list(Leverage.flatten()))
 
                 State_1, Reward, Done, Info = self.Environment.step(Leverage[0])
-                Episode_Exp.append({"s0" : State_0, "s1" : State_1, "r" : Reward, "a" : Leverage})
+                Episode_Exp.append({"s0" : State_0, "s1" : State_1, "r" : Reward, "a" : Leverage, 'i' : Info})
                 State_0 = State_1
 
 
@@ -295,6 +300,10 @@ class Actor_Critic:
                 self.Critic.Fit(State, Reward)
 
                 Exp = []
+                if 'Ave_Perf' in Plot : Plot_Data['Ave_Perf'].append(self.Aggregated_Performance_Plot())
+
+            # Plot per episode metrics
+            if 'Merton_Benchmark' in Plot : Plot_Data['Merton_Benchmark'].append(self.Merton_Benchmark(Episode_Exp))
 
             # Now check if any intermitant plots need to be generated:
             if np.any(i == Record_Eps):
@@ -308,6 +317,7 @@ class Actor_Critic:
         return self.Actor.Predict(X.reshape(1, self.State_Dim))
 
 
+    # Plotting Functions
     def Merton_Sim_Plot (self, i):
         Test_State = np.hstack((np.zeros((20,1)), np.linspace(0,1,20).reshape(-1,1)))
         Data = {"Policy" : self.Actor.Predict(Test_State).reshape(-1, self.Action_Dim),
@@ -315,3 +325,33 @@ class Actor_Critic:
                 "Title"  : str(i + 1) + " Eps"}
 
         return Data
+
+
+    def Merton_Benchmark (self, Episode_Exp):
+
+        # Inital wealth is the first entry to the first state
+        Intial_Wealth = Episode_Exp[0]['s0'][0]
+        Merton_Return = Intial_Wealth
+
+        for i in range(len(Episode_Exp)):
+            Merton_Return *= (1 + Episode_Exp[i]['i']['Rfree'] + Episode_Exp[i]['i']['Mkt-Rf'] * self.Environment.Training_Merton)
+
+        return Episode_Exp[-1]['r'] - self.Environment.Utility(Merton_Return)
+
+
+    def Aggregated_Performance_Plot (self):
+        ''' Run through 100 episodes acting greedily and report the averaged terminal reward '''
+        Rewards = []
+
+        for i in range(100):
+            Done = False
+            State = self.Environment.reset()
+
+            while Done == False:
+                Action = self.Actor.Predict(State.reshape(1, self.State_Dim))
+                State, Reward, Done, Info = self.Environment.step(Action.flatten())
+
+            Rewards.append(Reward)
+
+        return np.mean(Rewards)
+        
