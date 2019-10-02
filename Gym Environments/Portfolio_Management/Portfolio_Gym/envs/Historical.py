@@ -4,6 +4,9 @@ import warnings
 import gym
 import os
 
+# If you mess it up just pull from the Git.
+# The first objective is to remove any use of pandas in the high frequency areas of the environment
+
 # Global "Constants"
 _Daily_Filename      = os.path.realpath(__file__).replace("Historical.py", "PredictorDataDaily.csv")
 _Monthly_Filename    = os.path.realpath(__file__).replace("Historical.py", "PredictorDataMonthly.csv")
@@ -46,51 +49,54 @@ class HistoricalEnv(gym.Env):
 
 
         # Read in the data...
-        if self.Time_Step == "Daily":
+        if self.Time_Step == 'Daily':
             self.Data = pd.read_csv(_Daily_Filename)
 
-            # "Cross-Sectional Premium" as ~7000 missing entires vs the entire rest of the database which has 270.
-            self.Data.drop(columns = ["Cross-Sectional Premium"])
+            # "Cross-Sectional Premium" has ~7000 missing entires vs the entire rest of the database which has 270.
+            self.Data.drop(columns = ['Cross-Sectional Premium'])
             self.Data = self.Data.dropna()
-            self.Data["Mkt-RF"] = self.Data["Mkt-RF"] / 100
+            self.Data['Mkt-RF'] = self.Data['Mkt-RF'] / 100
             self.Data['Risk-Free Rate'] = self.Data['Risk-Free Rate'] / 100
             self.Data = self.Data.reset_index(drop = True)
 
-            self.X = "Mkt-RF"
-            self.Y = list(self.Data.columns.values)
-            self.Y.remove("Unnamed: 0")
-            self.Rf = "Risk-Free Rate"
+            self.Return_Data = self.Data['Mkt-RF'].values
+            self.State_Data = list(self.Data.columns.values)
+            self.State_Data.remove('Unnamed: 0')
+            self.State_Data = self.Data[self.State_Data].values
+            self.Rf = self.Data['Risk-Free Rate'].values
 
 
-        elif self.Time_Step == "Monthly":
+        elif self.Time_Step == 'Monthly':
             self.Data = pd.read_csv(_Monthly_Filename)
 
             # Again "csp" is missing too many entires to be included.
-            self.Data.drop(columns = ["csp"])
-            self.Data["Mkt_Ret"] = self.Data["Index"].pct_change() - self.Data['Rfree']
+            self.Data.drop(columns = ['csp'])
+            self.Data['Mkt_Ret'] = self.Data['Index'].pct_change() - self.Data['Rfree']
             self.Data = self.Data.dropna()
             self.Data = self.Data.reset_index(drop = True)
 
-            self.X = "Mkt_Ret"
-            self.Y = list(self.Data.columns.values)
-            self.Y.remove("Unnamed: 2")
-            self.Rf = "Rfree"
+            self.Return_Data = self.Data['Mkt_Ret'].values
+            self.State_Data = list(self.Data.columns.values)
+            self.State_Data.remove('Unnamed: 2')
+            self.State_Data = self.Data[self.State_Data].values
+            self.Rf = self.Data['Rfree'].values
 
         elif self.Time_Step == 'Monthly-v1':
             self.Data = pd.read_csv(_Monthly_Filename_V2)
 
-            self.Y = ['D12', 'E12', 'Rfree', 'DY', 'EY', 'DP', 'DE', 'svar', 'infl', 'AAA', 'BAA', 'lty', 'defaultspread', 'tbl',
+            self.State_Data = ['D12', 'E12', 'Rfree', 'DY', 'EY', 'DP', 'DE', 'svar', 'infl', 'AAA', 'BAA', 'lty', 'defaultspread', 'tbl',
                       'b/m', 'ntis', 'ltr', 'corpr', 'CRSP_SPvw', 'CRSP_SPvwx', 'Mom']
-            self.Data = self.Data[self.Y + ['Return']]
+            self.Data = self.Data[self.State_Data + ['Return']]
             self.Data = self.Data.dropna()
             self.Data = self.Data.reset_index(drop = True)
             self.Data['Mkt_Ret'] = self.Data['Return'] - self.Data['Rfree']
-            self.X = "Mkt_Ret"
-            self.Rf = "Rfree"
+            self.Return_Data = self.Data['Mkt_Ret'].values
+            self.State_Data = self.Data[self.State_Data].values
+            self.Rf = self.Data['Rfree'].values
 
 
         # Plus two as wealth and tau are also part of the state space.
-        self.observation_space = gym.spaces.Box(low = np.array([-np.inf] * (len(self.Y) + 2)), high = np.array([np.inf] * (len(self.Y) + 2)), dtype = np.float32)
+        self.observation_space = gym.spaces.Box(low = np.array([-np.inf] * (self.State_Data.shape[1] + 2)), high = np.array([np.inf] * (self.State_Data.shape[1] + 2)), dtype = np.float32)
         self.Reset_Validation_Data()
 
 
@@ -137,17 +143,25 @@ class HistoricalEnv(gym.Env):
         self.Intermediate_Reward = kwargs['Intermediate_Reward'] if 'Intermediate_Reward' in kwargs.keys() else self.Intermediate_Reward
 
         if self.Time_Step == 'Monthly-v1' and 'State_Parameters' in kwargs.keys():
-            self.Y = kwargs['State_Parameters']
+            self.State_Data = kwargs['State_Parameters']
 
             self.Data = pd.read_csv(_Monthly_Filename_V2)
-            self.Data = self.Data[self.Y + ['Return']]
+            if 'Rfree' in kwargs['State_Parameters']:
+                self.Data = self.Data[self.State_Data + ['Return']]
+            else:
+                self.Data = self.Data[self.State_Data + ['Return', 'Rfree']]
+
             self.Data.dropna()
             self.Data = self.Data.reset_index(drop = True)
             self.Data['Return'] = self.Data['Return'] - self.Data['Rfree']
 
+            self.State_Data  = self.Data[self.State_Data].values
+            self.Return_Data = self.Data['Return'].values
+            self.Rf = self.Data['Rfree'].values
+
 
         self.action_space = gym.spaces.Box(low = self.Min_Leverage, high = self.Max_Leverage, shape = (1,), dtype = np.float32)
-        self.observation_space = gym.spaces.Box(low = np.array([-np.inf] * (len(self.Y) + 2)), high = np.array([np.inf] * (len(self.Y) + 2)), dtype = np.float32)
+        self.observation_space = gym.spaces.Box(low = np.array([-np.inf] * (self.State_Data.shape[1] + 2)), high = np.array([np.inf] * (self.State_Data.shape[1] + 2)), dtype = np.float32)
 
 
         for key in kwargs.keys():
@@ -168,14 +182,14 @@ class HistoricalEnv(gym.Env):
         '''
 
         if Set_last == False:
-            self.Validation_Start = np.random.randint(low = self.Episode_Length, high = (self.Data.shape[0] * (1 - self.Validation_Frac)) - self.Episode_Length)
+            self.Validation_Start = np.random.randint(low = self.Episode_Length, high = (self.State_Data.shape[0] * (1 - self.Validation_Frac)) - self.Episode_Length)
             self.Validation_End   = self.Validation_Start + int(self.Data.shape[0] * self.Validation_Frac)
         else:
-            self.Validation_Start = int(self.Data.shape[0] * (1 - self.Validation_Frac))
-            self.Validation_End   = int(self.Data.shape[0])
+            self.Validation_Start = int(self.State_Data.shape[0] * (1 - self.Validation_Frac))
+            self.Validation_End   = int(self.State_Data.shape[0])
 
-        Mean = np.mean(np.append(self.Data.iloc[0:self.Validation_Start][self.X].values, self.Data.iloc[self.Validation_End::][self.X].values))
-        Vars = np.var(np.append(self.Data.iloc[0:self.Validation_Start][self.X].values, self.Data.iloc[self.Validation_End::][self.X].values))
+        Mean = np.mean(np.vstack((self.State_Data[0:self.Validation_Start], self.State_Data[self.Validation_End:])))
+        Vars = np.var(np.vstack((self.State_Data[0:self.Validation_Start], self.State_Data[self.Validation_End:])))
 
         self.Training_Merton = Mean / (Vars * self.Risk_Aversion)
         self.Training_Var    = Vars
@@ -195,7 +209,7 @@ class HistoricalEnv(gym.Env):
         '''
 
         if self.isTraining == True:
-            Possible_Indexes = np.append(np.arange(self.Validation_Start - self.Episode_Length), np.arange(self.Validation_End, self.Data.shape[0] - self.Episode_Length))
+            Possible_Indexes = np.append(np.arange(self.Validation_Start - self.Episode_Length), np.arange(self.Validation_End, self.State_Data.shape[0] - self.Episode_Length))
             self.Start_Index = np.random.choice(Possible_Indexes)
             self.Wealth = np.random.uniform()
         else:
@@ -239,7 +253,7 @@ class HistoricalEnv(gym.Env):
         assert self.Done == False, "Attempt to take an action whilst Done == True"
         assert self.action_space.contains(Action), "Action %r is not within the action space" % (Action)
 
-        Return = (1 + self.Data.iloc[self.Index][self.Rf] + self.Data.iloc[self.Index][self.X] * Action[0])
+        Return = (1 + self.Rf[self.Index] + self.Return_Data[self.Index] * Action[0])
 
         if self.Intermediate_Reward == True and self.Risk_Aversion == 1:
             self.Reward = self.Utility(self.Wealth * Return) - self.Utility()
@@ -247,7 +261,7 @@ class HistoricalEnv(gym.Env):
             self.Reward = 0
 
         self.Index += 1
-        self.Wealth *= (1 + self.Data.iloc[self.Index][self.Rf] + self.Data.iloc[self.Index][self.X] * Action[0])
+        self.Wealth *= Return
 
         if (self.Index >= self.End_Index) or (self.Wealth <= 0):
             self.Done = True
@@ -267,7 +281,7 @@ class HistoricalEnv(gym.Env):
     def Gen_State (self):
         ''' Genrates a state array '''
         Tau = (self.End_Index - self.Index) / (252 if self.Time_Step == 'Daily' else 12)
-        return np.append([self.Wealth, Tau], self.Data.iloc[self.Index][self.Y].values)
+        return np.append([self.Wealth, Tau], self.State_Data[self.Index])
 
 
     def Gen_Info (self):
@@ -282,12 +296,8 @@ class HistoricalEnv(gym.Env):
                     'Mkt-Rf' : The market excess return on the step
         '''
 
-        Info = {'Mkt-Rf' : self.Data.iloc[self.Index][self.X]}
-
-        if self.Time_Step == 'Daily':
-            Info['Rfree'] = self.Data.iloc[self.Index]['Risk-Free Rate']
-        elif self.Time_Step == 'Monthly' or self.Time_Step == 'Monthly-v1':
-            Info['Rfree'] = self.Data.iloc[self.Index]['Rfree']
+        Info = {'Mkt-Rf' : self.Return_Data[self.Index],
+                'Rfree'  : self.Rf[self.Index]}
 
         return Info
 
