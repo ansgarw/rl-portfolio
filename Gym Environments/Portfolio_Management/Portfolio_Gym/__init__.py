@@ -10,7 +10,8 @@ register(id = 'Simulated-v0', entry_point = 'Portfolio_Gym.envs:SimulatedEnv', k
                                                                                          'Time_Horizon'        : 1,
                                                                                          'Time_Step'           : 1/12,
                                                                                          'Model'               : "GBM",
-                                                                                         'Intermediate_Reward' : False},)
+                                                                                         'Intermediate_Reward' : False,
+                                                                                         'State_Corrolations'  : []})
 
 
 register(id = 'Historical_Daily-v0', entry_point = 'Portfolio_Gym.envs:HistoricalEnv', kwargs = {'Risk_Aversion'  : 1,

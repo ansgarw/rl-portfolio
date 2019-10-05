@@ -2,6 +2,8 @@ import numpy as np
 import warnings
 import gym
 
+# If you mess up just pull the last version from the Git
+
 # CHANGELOG
 # Changed max wealth in obs. space from inf to 100 fold.
 # Adjusted default values for Max/Min leverage as well as Time_Step
@@ -12,6 +14,8 @@ import gym
 # Episode is ended if negative wealth is observed
 # Power_Utility updated to handle negative wealth with a constant penalisation
 # Instantaneous reward is now optional if risk aversion is one.
+
+# Now introducing an explanitory variable, to simulate the use of ecconomic data.
 
 
 class SimulatedEnv(gym.Env):
@@ -32,6 +36,7 @@ class SimulatedEnv(gym.Env):
         self.Time_Horizon  = kwargs['Time_Horizon']
         self.Time_Step     = kwargs['Time_Step']
         self.Intermediate_Reward = kwargs['Intermediate_Reward']
+        self.State_Corrolations  = kwargs['State_Corrolations']
         # if MODEL == SOME_OTHER_MODEL ...
 
         self.Wealth = np.random.uniform()
@@ -41,16 +46,10 @@ class SimulatedEnv(gym.Env):
         self.Done   = False
         self.Reward = 0
 
-        # 0: Tau
-        # 1: Wealth
-        self.observation_space = gym.spaces.Box(low = np.array([0.0, 0.0]), high = np.array([self.Time_Horizon, 100]), dtype = np.float32)
+        if not (isinstance(self.Mu, int) or isinstance(self.Mu, float)):
+            warnings.warn('Multi-Asset is not defensively implemented at this time.')
 
-        if isinstance(self.Mu, int) or isinstance(self.Mu, float):
-            self.Return_Func = self.Single_Asset_GBM
-            self.action_space = gym.spaces.Box(low = self.Min_Leverage, high = self.Max_Leverage, shape = (1,), dtype = np.float32)
-        else:
-            self.Return_Func = self.Multi_Asset_GBM
-            self.action_space = gym.spaces.Box(low = np.array([self.Min_Leverage] * self.Mu.size), high = np.array([self.Max_Leverage] * self.Mu.size), dtype = np.float32)
+        self.Set_Action_Space()
 
 
     def Set_Params (self, **kwargs):
@@ -73,6 +72,9 @@ class SimulatedEnv(gym.Env):
             Model                : The model to use to generate returns. Currently the only acceptable argument is “GBM”.
             Intermediate_Rewards : A flag indicating whether the environment will return intermediate rewards. Note for this parameter to have an
                                    effect Risk_Aversion must equal one, or it will default to false.
+            State_Corrolations   : A list of floats, in which the Nth variable corresponds to the corrolation between the Nth state parameter and
+                                   the asset return for the next period. Note that this feature may only be used with a single asset.
+                                   The means and variances of the factors are generated randomly.
         '''
 
         self.Mu            = kwargs['Mu']            if 'Mu'            in kwargs.keys() else self.Mu
@@ -85,20 +87,59 @@ class SimulatedEnv(gym.Env):
         self.Time_Horizon  = kwargs['Time_Horizon']  if 'Time_Horizon'  in kwargs.keys() else self.Time_Horizon
         self.Time_Step     = kwargs['Time_Step']     if 'Time_Step'     in kwargs.keys() else self.Time_Step
         self.Intermediate_Reward = kwargs['Intermediate_Reward'] if 'Intermediate_Reward' in kwargs.keys() else self.Intermediate_Reward
+        self.State_Corrolations  = kwargs['State_Corrolations'] if 'State_Corrolations' in kwargs.keys() else self.State_Corrolations
+
 
         # Update action space
-        if isinstance(self.Mu, int) or isinstance(self.Mu, float):
-            assert isinstance(self.Sigma, int) or isinstance(self.Sigma, float), "Sigma type does not match Mu"
-            self.Return_Func = self.Single_Asset_GBM
-            self.action_space = gym.spaces.Box(low = self.Min_Leverage, high = self.Max_Leverage, shape = (1,), dtype = np.float32)
-        else:
-            assert self.Mu.size == self.Sigma.size, "The size of Mu and Sigma must match"
-            self.Return_Func = self.Multi_Asset_GBM
-            self.action_space = gym.spaces.Box(low = np.array([self.Min_Leverage] * self.Mu.size), high = np.array([self.Max_Leverage] * self.Mu.size), dtype = np.float32)
+        self.Set_Action_Space()
 
         for key in kwargs.keys():
-            if not key in ('Mu', 'Sigma', 'Rf', 'Row', 'Risk_Aversion', 'Max_Leverage', 'Min_Leverage', 'Time_Horizon', 'Time_Step', 'Intermediate_Reward'):
+            if not key in ('Mu', 'Sigma', 'Rf', 'Row', 'Risk_Aversion', 'Max_Leverage', 'Min_Leverage', 'Time_Horizon', 'Time_Step', 'Intermediate_Reward', 'State_Corrolations'):
                 print("Keyword:", key, "not recognised.")
+
+
+    def Set_Action_Space(self):
+        ''' Define the State and action spaces '''
+
+        # 0: Tau
+        # 1: Wealth
+        # N: State Variables
+        if len(self.State_Corrolations) == 0:
+            self.observation_space = gym.spaces.Box(low = np.array([0.0, 0.0]), high = np.array([self.Time_Horizon, 100]), dtype = np.float32)
+
+        else:
+            Low  = np.array([0.0, 0.0] + ([-np.inf] * len(self.State_Corrolations)))
+            High = np.array([self.Time_Horizon, 100] + ([np.inf] * len(self.State_Corrolations)))
+            self.observation_space = gym.spaces.Box(low = Low, high = High, dtype = np.float32)
+
+            # Setup the Asset-Factors covariance matrix
+            self.Factor_Mus = np.random.uniform(low = -10, high = 10, size = len(self.State_Corrolations))
+            self.Factor_Std = np.random.uniform(low = 0, high = 1, size = len(self.State_Corrolations))
+
+            self.Asset_Factor_Cov = np.ones((len(self.State_Corrolations) + 1, len(self.State_Corrolations) + 1))
+
+            self.Asset_Factor_Cov[0,0] = (self.Sigma * (self.Time_Step ** 0.5)) ** 2
+            self.Asset_Factor_Cov[0][1::] = np.array(self.State_Corrolations) * self.Factor_Std * self.Sigma * (self.Time_Step ** 0.5)
+            self.Asset_Factor_Cov[:,0] = self.Asset_Factor_Cov[0]
+            self.Asset_Factor_Cov[1::, 1::] = np.diag(np.diag(np.matmul(self.Factor_Std.reshape(-1,1), self.Factor_Std.reshape(1,-1))))
+
+
+        if isinstance(self.Mu, int) or isinstance(self.Mu, float):
+            if len(self.State_Corrolations) == 0:
+                self.Return_Func     = self.Single_Asset_GBM
+                self.action_space    = gym.spaces.Box(low = self.Min_Leverage, high = self.Max_Leverage, shape = (1,), dtype = np.float32)
+                self.Training_Merton = (self.Mu - self.Rf) / (self.Risk_Aversion * (self.Sigma ** 2))
+                self.Training_Var    = self.Sigma ** 2
+
+            else:
+                self.Return_Func  = self.Single_Asset_Factors
+                self.action_space = gym.spaces.Box(low = self.Min_Leverage, high = self.Max_Leverage, shape = (1,), dtype = np.float32)
+
+        else:
+            assert len(self.State_Corrolations) == 0, "State Parameters not supported with multiple assets."
+
+            self.Return_Func = self.Multi_Asset_GBM
+            self.action_space = gym.spaces.Box(low = np.array([self.Min_Leverage] * self.Mu.size), high = np.array([self.Max_Leverage] * self.Mu.size), dtype = np.float32)
 
 
     def step(self, action):
@@ -124,9 +165,7 @@ class SimulatedEnv(gym.Env):
             self.Tau = 0 if self.Tau < 0 else self.Tau
             self.Reward = self.Utility()
 
-        self.State = np.array([self.Tau, self.Wealth])
-
-        return self.State, self.Reward, self.Done, {}
+        return self.Gen_State(), self.Reward, self.Done, self.Gen_Info()
 
 
     def reset(self):
@@ -138,21 +177,67 @@ class SimulatedEnv(gym.Env):
         self.Done = False
         self.Reward = 0
 
-        return self.State
+        if len(self.State_Corrolations) > 0:
+            self.Gen_Factors()
+
+        return self.Gen_State()
 
 
     def render(self):
         print("Current Wealth: " + str(round(self.Wealth, 4)) + ", Tau: " + str(self.Tau) + "\n")
 
 
+    def Gen_State (self):
+        if len(self.State_Corrolations) == 0:
+            return np.array([self.Wealth, self.Tau])
+        else:
+            return np.append(np.array([self.Wealth, self.Tau]), self._Factor_Model_Returns[1::])
 
 
+    def Gen_Info (self):
+        '''
+        Info contains information external to the state which may be used during validation to provide a benchmark to check
+        the agent against.
 
-    def Single_Asset_GBM(self, Action):
+        Returns
+        -------
+            A dictionary with the following keys:
+                    'Rfree'  : The current risk free rate
+                    'Mkt-Rf' : The market excess return on the step
+        '''
+
+        Info = {'Rfree'  : self.Rf,
+                'Mkt-Rf' : self._Factor_Model_Returns[0]}
+        return Info
+
+
+    def Gen_Factors (self):
+        ''' Generates the state factors, and next periods return '''
+
+        Mu_ = [(self.Mu - (self.Sigma ** 2) / 2) * self.Time_Step] + list(self.Factor_Mus)
+        self._Factor_Model_Returns = np.random.multivariate_normal(Mu_, self.Asset_Factor_Cov)
+
+
+    def Single_Asset_Factors (self, Action):
+        ''' This function generates a return per the market return generated and stored at the last step, and then
+        regenerates next steps market return and this steps state parameters '''
+
+        # First calculate the return
+        Return = (np.exp(self._Factor_Model_Returns[0]) - 1) - (self.Rf * self.Time_Step)
+        Net_Return = (1 + (self.Rf * self.Time_Step) + (Action[0] * Return))
+
+        # Now draw a new values for the factors and a return for next period.
+        self.Gen_Factors()
+
+        return Net_Return
+
+
+    def Single_Asset_GBM (self, Action):
         # Generate returns from a normal distribution
         Mean = (self.Mu - (self.Sigma ** 2) / 2) * self.Time_Step
         Std = self.Sigma * (self.Time_Step ** 0.5)
         Return = (np.exp(np.random.normal(Mean, Std)) - 1) - (self.Rf * self.Time_Step)
+        self._Factor_Model_Returns = Return
         Net_Return = (1 + (self.Rf * self.Time_Step) + (Action[0] * Return))
 
         return Net_Return
@@ -165,17 +250,23 @@ class SimulatedEnv(gym.Env):
         Covs  = self.Row * np.matmul(Stds, Stds.T)
 
         Returns = (np.exp(np.random.multivariate_normal(Means, Covs)) - 1) - (self.Rf * self.Time_Step)
+        self._Factor_Model_Returns = Returns
         Net_Return = (1 + (self.Rf * self.Time_Step) + np.sum(Action * Returns))
 
         return Net_Return
 
 
-    def Utility(self):
-        if self.Wealth <= 0:
-            return -10
+    def Utility (self, *args):
+        ''' Determine the utility of the investor at the end of life '''
 
-        if self.Risk_Aversion == 1:
-            return np.log(self.Wealth)
-
+        if len(args) == 1:
+            Wealth = args[0]
         else:
-            return (self.Wealth ** (1 - self.Risk_Aversion)) / (1 - self.Risk_Aversion)
+            Wealth = self.Wealth
+
+        if Wealth <= 0:
+            return -10
+        elif self.Risk_Aversion == 1:
+            return np.log(Wealth)
+        else:
+            return (Wealth ** (1 - self.Risk_Aversion)) / (1 - self.Risk_Aversion)
