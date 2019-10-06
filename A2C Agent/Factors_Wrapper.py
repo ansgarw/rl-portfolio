@@ -48,6 +48,9 @@ class Factors_Wrapper:
 
         self.Agent.Train(N_Episodes, Plot = self.Plotting_Function)
 
+        if hasattr(self.Agent.Environment, 'Validate'):
+            self.Plot_Data['Validate'] = self.Agent.Environment.Validate(100, self.Agent)
+
         self.Display()
 
 
@@ -137,5 +140,16 @@ class Factors_Wrapper:
             ax[i].set_xlabel('Model')
             ax[i].set_ylabel('R Squared')
             i += 1
+
+
+        if 'Validate' in self.Plot_Data.keys():
+            ax[i].scatter(np.arange(len(self.Plot_Data['Validate'][0])), self.Plot_Data['Validate'][0], label = 'Agent',  color = 'lightskyblue')
+            ax[i].scatter(np.arange(len(self.Plot_Data['Validate'][1])), self.Plot_Data['Validate'][1], label = 'RFree',  color = 'mediumvioletred')
+            ax[i].scatter(np.arange(len(self.Plot_Data['Validate'][2])), self.Plot_Data['Validate'][2], label = 'Merton', color = 'darkblue')
+            ax[i].set_xlabel('Validation Episode')
+            ax[i].set_ylabel('Utility')
+            ax[i].legend()
+
+
 
         plt.show()

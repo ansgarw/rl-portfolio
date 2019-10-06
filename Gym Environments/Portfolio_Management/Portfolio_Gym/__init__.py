@@ -15,22 +15,32 @@ register(id = 'Simulated-v0', entry_point = 'Portfolio_Gym.envs:SimulatedEnv', k
 
 
 register(id = 'Historical_Daily-v0', entry_point = 'Portfolio_Gym.envs:HistoricalEnv', kwargs = {'Risk_Aversion'  : 1,
-                                                                                           'Time_Step'       : "Daily",
-                                                                                           'Episode_Length'  : 252,
-                                                                                           'Max_Leverage'    : 10,
-                                                                                           'Min_Leverage'    : 10,
-                                                                                           'Validation_Frac' : 0.3},)
+                                                                                           'Time_Step'            : "Daily",
+                                                                                           'Episode_Length'       : 252,
+                                                                                           'Max_Leverage'         : 10,
+                                                                                           'Min_Leverage'         : 10,
+                                                                                           'Validation_Frac'      : 0.3,
+                                                                                           'Fama_Returns'         : True,
+                                                                                           'Technical_Data'       : False,
+                                                                                           'Intermediate_Reward'  : False},)
 
-register(id = 'Historical_Monthly-v0', entry_point = 'Portfolio_Gym.envs:HistoricalEnv', kwargs = {'Risk_Aversion'   : 1,
-                                                                                                   'Time_Step'       : "Monthly",
-                                                                                                   'Episode_Length'  : 12,
-                                                                                                   'Max_Leverage'    : 10,
-                                                                                                   'Min_Leverage'    : 10,
-                                                                                                   'Validation_Frac' : 0.3},)
+register(id = 'Historical_Monthly-v0', entry_point = 'Portfolio_Gym.envs:HistoricalEnv', kwargs = {'Risk_Aversion'       : 1,
+                                                                                                   'Time_Step'           : "Monthly",
+                                                                                                   'Episode_Length'      : 12,
+                                                                                                   'Max_Leverage'        : 10,
+                                                                                                   'Min_Leverage'        : 10,
+                                                                                                   'Validation_Frac'     : 0.3,
+                                                                                                   'Fama_Returns'        : True,
+                                                                                                   'Technical_Data'      : False,
+                                                                                                   'Intermediate_Reward' : False},)
 
-register(id = 'Historical_Monthly-v1', entry_point = 'Portfolio_Gym.envs:HistoricalEnv', kwargs = {'Risk_Aversion'   : 1,
-                                                                                                   'Time_Step'       : "Monthly-v1",
-                                                                                                   'Episode_Length'  : 12,
-                                                                                                   'Max_Leverage'    : 10,
-                                                                                                   'Min_Leverage'    : 10,
-                                                                                                   'Validation_Frac' : 0.3},)
+# Depricated
+register(id = 'Historical_Monthly-v1', entry_point = 'Portfolio_Gym.envs:HistoricalEnv', kwargs = {'Risk_Aversion'       : 1,
+                                                                                                   'Time_Step'           : "Monthly",
+                                                                                                   'Episode_Length'      : 12,
+                                                                                                   'Max_Leverage'        : 10,
+                                                                                                   'Min_Leverage'        : 10,
+                                                                                                   'Validation_Frac'     : 0.3,
+                                                                                                   'Fama_Returns'        : True,
+                                                                                                   'Technical_Data'      : False,
+                                                                                                   'Intermediate_Reward' : False},)
