@@ -116,6 +116,7 @@ class SimulatedEnv(gym.Env):
             self.Factor_Mus = np.random.uniform(low = -10, high = 10, size = len(self.State_Corrolations))
             self.Factor_Std = np.random.uniform(low = 0, high = 1, size = len(self.State_Corrolations))
 
+            # Mild bug - If sum of factor corrolations is greater than one matrix will not be positive semi-definite.
             self.Asset_Factor_Cov = np.ones((len(self.State_Corrolations) + 1, len(self.State_Corrolations) + 1))
 
             self.Asset_Factor_Cov[0,0] = (self.Sigma * (self.Time_Step ** 0.5)) ** 2

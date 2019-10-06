@@ -8,9 +8,8 @@ import os
 # The first objective is to remove any use of pandas in the high frequency areas of the environment
 
 # Global "Constants"
-_Daily_Filename      = os.path.realpath(__file__).replace("Historical.py", "PredictorDataDaily.csv")
-_Monthly_Filename    = os.path.realpath(__file__).replace("Historical.py", "PredictorDataMonthly.csv")
-_Monthly_Filename_V2 = os.path.realpath(__file__).replace("Historical.py", "Monthly_Data.csv")
+_Daily_Filename   = os.path.realpath(__file__).replace("Historical.py", "PredictorDataDaily.csv")
+_Monthly_Filename = os.path.realpath(__file__).replace("Historical.py", "Monthly_Data_II.csv")
 
 class HistoricalEnv(gym.Env):
 
@@ -24,6 +23,8 @@ class HistoricalEnv(gym.Env):
             Risk_Aversion  : The risk aversion of the agent
             Max_Leverage   : The maximum leverage that the bot may take without triggering an error
             Min_Leverage   : THe minimum leverage that the bot may take without triggering an error
+            Fama_Returns   : (Boolean) The environment may either use Fama French market wide excess return, or S&P Index Return (Monthly Only.) (Defualt True)
+            Technical_Data : (Boolean) A flag to indiciate whether daily returns for the Fama Mkt should be included. (Defualt False)
 
 
         Notes
@@ -31,15 +32,17 @@ class HistoricalEnv(gym.Env):
             1. The environment must be reset after initialisation (by calling myEnv.reset())
         '''
 
-        assert kwargs['Time_Step'] in ("Daily", "Monthly", "Monthly-v1"), "Episode_Length % not recognised, Please input Daily or Monthly"
+        assert kwargs['Time_Step'] in ("Daily", "Monthly"), "Episode_Length % not recognised, Please input Daily or Monthly"
 
-        self.Time_Step       = kwargs['Time_Step']
-        self.Risk_Aversion   = kwargs['Risk_Aversion']
-        self.Episode_Length  = kwargs['Episode_Length']
-        self.Max_Leverage    = kwargs['Max_Leverage']
-        self.Min_Leverage    = kwargs['Min_Leverage']
-        self.Validation_Frac = kwargs['Validation_Frac']
-        self.Intermediate_Reward = False
+        self.Time_Step           = kwargs['Time_Step']
+        self.Risk_Aversion       = kwargs['Risk_Aversion']
+        self.Episode_Length      = kwargs['Episode_Length']
+        self.Max_Leverage        = kwargs['Max_Leverage']
+        self.Min_Leverage        = kwargs['Min_Leverage']
+        self.Validation_Frac     = kwargs['Validation_Frac']
+        self.Fama_Returns        = kwargs['Fama_Returns']
+        self.Technical_Data      = kwargs['Technical_Data']
+        self.Intermediate_Reward = kwargs['Intermediate_Reward']
 
         # Flag used to distinguish a training episode from a validation epiodse, to facilitate cross val.
         self.isTraining = True
@@ -68,31 +71,31 @@ class HistoricalEnv(gym.Env):
 
         elif self.Time_Step == 'Monthly':
             self.Data = pd.read_csv(_Monthly_Filename)
+            self.State_Parameters = ['D12', 'E12', 'DY', 'EY', 'DP', 'DE', 'svar', 'infl', 'AAA', 'BAA', 'lty', 'defaultspread', 'tbl',
+                                     'b/m', 'ntis', 'ltr', 'corpr', 'CRSP_SPvw', 'CRSP_SPvwx', 'Mom', 'HML', 'SMB']
 
-            # Again "csp" is missing too many entires to be included.
-            self.Data.drop(columns = ['csp'])
-            self.Data['Mkt_Ret'] = self.Data['Index'].pct_change() - self.Data['Rfree']
-            self.Data = self.Data.dropna()
-            self.Data = self.Data.reset_index(drop = True)
+            if self.Technical_Data == True:
+                for i in range(28):
+                    self.State_Parameters.extend(['Mkt-RF day ' + str(i), 'HML day ' + str(i), 'SMB day ' + str(i)])
 
-            self.Return_Data = self.Data['Mkt_Ret'].values
-            self.State_Data = list(self.Data.columns.values)
-            self.State_Data.remove('Unnamed: 2')
-            self.State_Data = self.Data[self.State_Data].values
-            self.Rf = self.Data['Rfree'].values
 
-        elif self.Time_Step == 'Monthly-v1':
-            self.Data = pd.read_csv(_Monthly_Filename_V2)
+            if self.Fama_Returns == True:
+                self.Data = self.Data[self.State_Parameters + ['Fama Mkt Excess', '1M TBill']]
+                self.Data.dropna(inplace = True)
+                self.Data.reset_index(drop = True, inplace = True)
 
-            self.State_Data = ['D12', 'E12', 'Rfree', 'DY', 'EY', 'DP', 'DE', 'svar', 'infl', 'AAA', 'BAA', 'lty', 'defaultspread', 'tbl',
-                      'b/m', 'ntis', 'ltr', 'corpr', 'CRSP_SPvw', 'CRSP_SPvwx', 'Mom']
-            self.Data = self.Data[self.State_Data + ['Return']]
-            self.Data = self.Data.dropna()
-            self.Data = self.Data.reset_index(drop = True)
-            self.Data['Mkt_Ret'] = self.Data['Return'] - self.Data['Rfree']
-            self.Return_Data = self.Data['Mkt_Ret'].values
-            self.State_Data = self.Data[self.State_Data].values
-            self.Rf = self.Data['Rfree'].values
+                self.Return_Data = self.Data['Fama Mkt Excess'].values
+                self.State_Data  = self.Data[self.State_Parameters].values
+                self.Rf          = self.Data['1M TBill'].values
+
+            else:
+                self.Data = self.Data[self.State_Parameters + ['Return', 'Rfree']]
+                self.Data.dropna(inplace = True)
+                self.Data.reset_index(drop = True, inplace = True)
+
+                self.Return_Data = (self.Data['Return'] - self.Data['Rfree']).values
+                self.State_Data  = self.Data[self.State_Parameters].values
+                self.Rf          = self.Data['Rfree'].values
 
 
         # Plus two as wealth and tau are also part of the state space.
@@ -114,6 +117,9 @@ class HistoricalEnv(gym.Env):
             Validation_Frac     : The holdout fraction of the dataset.
             Intermediate_Reward : A flag to indicate whether the environment should return inter-episode rewards.
             State_Parameters    : A list of the parameters to be used to construct the state.
+            Fama_Returns        : (Boolean) The environment may either use Fama French market wide excess return, or S&P Index Return (Monthly Only.) (Defualt True)
+            Technical_Data      : (Boolean) A flag to indiciate whether daily returns for the Fama Mkt should be included. (Defualt False)
+
 
         State_Parameters
         ----------------
@@ -124,11 +130,11 @@ class HistoricalEnv(gym.Env):
             1871-01 : ['D12', 'E12', 'Rfree', 'DY', 'EY', 'DP', 'DE']
             1885-02 : ['svar']
             1920-02 : ['infl', 'AAA', 'BAA', 'lty', 'defaultspread', 'tbl']
+            1926-07 : ['SMB', 'HML']
             1927-01 : ['b/m', 'ntis', 'ltr', 'corpr', 'CRSP_SPvw', 'CRSP_SPvwx', 'Mom']
             1930-12 : ['BAB']
             1937-05 : ['csp']
             1947-01 : ['CPIAUCSL']
-            1963-07 : ['SMB', 'HML', 'RMW', 'CMA']
             1982-01 : ['Term spread']
 
             Data ends 2019.
@@ -141,23 +147,44 @@ class HistoricalEnv(gym.Env):
         self.Min_Leverage        = kwargs['Min_Leverage']        if 'Min_Leverage'        in kwargs.keys() else self.Min_Leverage
         self.Validation_Frac     = kwargs['Validation_Frac']     if 'Validation_Frac'     in kwargs.keys() else self.Validation_Frac
         self.Intermediate_Reward = kwargs['Intermediate_Reward'] if 'Intermediate_Reward' in kwargs.keys() else self.Intermediate_Reward
+        self.Technical_Data      = kwargs['Technical_Data']      if 'Technical_Data'      in kwargs.keys() else self.Technical_Data
+        self.Fama_Returns        = kwargs['Fama_Returns']        if 'Fama_Returns'        in kwargs.keys() else self.Fama_Returns
+        self.State_Parameters    = kwargs['State_Parameters']    if 'State_Parameters'    in kwargs.keys() else self.State_Parameters
 
-        if self.Time_Step == 'Monthly-v1' and 'State_Parameters' in kwargs.keys():
-            self.State_Data = kwargs['State_Parameters']
+        if self.Time_Step == 'Monthly':
+            if 'State_Parameters' in kwargs.keys() or 'Technical_Data' in kwargs.keys():
 
-            self.Data = pd.read_csv(_Monthly_Filename_V2)
-            if 'Rfree' in kwargs['State_Parameters']:
-                self.Data = self.Data[self.State_Data + ['Return']]
-            else:
-                self.Data = self.Data[self.State_Data + ['Return', 'Rfree']]
+                if self.Technical_Data == True:
+                    for i in range(28):
+                        self.State_Parameters.extend(['Mkt-RF day ' + str(i), 'HML day ' + str(i), 'SMB day ' + str(i)])
 
-            self.Data.dropna()
-            self.Data = self.Data.reset_index(drop = True)
-            self.Data['Return'] = self.Data['Return'] - self.Data['Rfree']
+                self.Data = pd.read_csv(_Monthly_Filename)
 
-            self.State_Data  = self.Data[self.State_Data].values
-            self.Return_Data = self.Data['Return'].values
-            self.Rf = self.Data['Rfree'].values
+                if self.Fama_Returns == True:
+                    Params = self.State_Parameters
+                    if not 'Fama Mkt Excess' in Params : Params.append('Fama Mkt Excess')
+                    if not '1M TBill' in Params : Params.append('1M TBill')
+
+                    self.Data = self.Data[Params]
+                    self.Data.dropna(inplace = True)
+                    self.Data.reset_index(drop = True, inplace = True)
+
+                    self.Return_Data = self.Data['Fama Mkt Excess'].values
+                    self.State_Data  = self.Data[self.State_Parameters].values
+                    self.Rf          = self.Data['1M TBill'].values
+
+                else:
+                    Params = self.State_Parameters
+                    if not 'Return' in Params : Params.append('Return')
+                    if not 'Rfree' in Params : Params.append('Rfree')
+
+                    self.Data = self.Data[list(Params)]
+                    self.Data.dropna(inplace = True)
+                    self.Data.reset_index(drop = True, inplace = True)
+
+                    self.Return_Data = (self.Data['Return'] - self.Data['Rfree']).values
+                    self.State_Data  = self.Data[self.State_Parameters].values
+                    self.Rf          = self.Data['Rfree'].values
 
 
         self.action_space = gym.spaces.Box(low = self.Min_Leverage, high = self.Max_Leverage, shape = (1,), dtype = np.float32)
@@ -165,14 +192,20 @@ class HistoricalEnv(gym.Env):
 
 
         for key in kwargs.keys():
-            if not key in ('Risk_Aversion', 'Episode_Length', 'Max_Leverage', 'Min_Leverage', 'Validation_Frac', 'Intermediate_Reward'):
+            if not key in ('Risk_Aversion', 'Episode_Length', 'Max_Leverage', 'Min_Leverage', 'Validation_Frac', 'Intermediate_Reward', 'Fama_Returns',
+                           'State_Parameters', 'Technical_Data'):
                 print("Keyword:", key, "not recognised.")
 
         if "Time_Step" in kwargs.keys():
             warnings.warn("Time_Step may not be changed, please use the daily/monthly environment")
 
+        if self.Risk_Aversion != 1 and self.Intermediate_Reward == True:
+            warnings.warn("Intermediate Reward as no effect when Risk Aversion is not equal to one.")
 
-    def Reset_Validation_Data (self, Set_last = False):
+        self.Reset_Validation_Data()
+
+
+    def Reset_Validation_Data (self, Set_last = True):
         '''
         Reset the location of the holdout validation dataset (In order to prevent overfitting hyper parameters to the validation set.)
 
@@ -188,8 +221,8 @@ class HistoricalEnv(gym.Env):
             self.Validation_Start = int(self.State_Data.shape[0] * (1 - self.Validation_Frac))
             self.Validation_End   = int(self.State_Data.shape[0])
 
-        Mean = np.mean(np.vstack((self.State_Data[0:self.Validation_Start], self.State_Data[self.Validation_End:])))
-        Vars = np.var(np.vstack((self.State_Data[0:self.Validation_Start], self.State_Data[self.Validation_End:])))
+        Mean = np.mean(np.append(self.Return_Data[0:self.Validation_Start], self.Return_Data[self.Validation_End:]))
+        Vars = np.var(np.append(self.Return_Data[0:self.Validation_Start], self.Return_Data[self.Validation_End:]))
 
         self.Training_Merton = Mean / (Vars * self.Risk_Aversion)
         self.Training_Var    = Vars
