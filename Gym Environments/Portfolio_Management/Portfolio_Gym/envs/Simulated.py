@@ -46,6 +46,9 @@ class SimulatedEnv(gym.Env):
         self.Done   = False
         self.Reward = 0
 
+        # Placeholder Parameters
+        self.Mkt_Return = None
+
         if not (isinstance(self.Mu, int) or isinstance(self.Mu, float)):
             warnings.warn('Multi-Asset is not defensively implemented at this time.')
 
@@ -208,7 +211,7 @@ class SimulatedEnv(gym.Env):
         '''
 
         Info = {'Rfree'  : self.Rf,
-                'Mkt-Rf' : self._Factor_Model_Returns[0]}
+                'Mkt-Rf' : self.Mkt_Return}
         return Info
 
 
@@ -224,8 +227,8 @@ class SimulatedEnv(gym.Env):
         regenerates next steps market return and this steps state parameters '''
 
         # First calculate the return
-        Return = (np.exp(self._Factor_Model_Returns[0]) - 1) - (self.Rf * self.Time_Step)
-        Net_Return = (1 + (self.Rf * self.Time_Step) + (Action[0] * Return))
+        self.Mkt_Return = (np.exp(self._Factor_Model_Returns[0]) - 1) - (self.Rf * self.Time_Step)
+        Net_Return = (1 + (self.Rf * self.Time_Step) + (Action[0] * self.Mkt_Return))
 
         # Now draw a new values for the factors and a return for next period.
         self.Gen_Factors()
@@ -237,9 +240,8 @@ class SimulatedEnv(gym.Env):
         # Generate returns from a normal distribution
         Mean = (self.Mu - (self.Sigma ** 2) / 2) * self.Time_Step
         Std = self.Sigma * (self.Time_Step ** 0.5)
-        Return = (np.exp(np.random.normal(Mean, Std)) - 1) - (self.Rf * self.Time_Step)
-        self._Factor_Model_Returns = Return
-        Net_Return = (1 + (self.Rf * self.Time_Step) + (Action[0] * Return))
+        self.Mkt_Return = (np.exp(np.random.normal(Mean, Std)) - 1) - (self.Rf * self.Time_Step)
+        Net_Return = (1 + (self.Rf * self.Time_Step) + (Action[0] * self.Mkt_Return))
 
         return Net_Return
 
@@ -250,9 +252,8 @@ class SimulatedEnv(gym.Env):
         Stds  = (self.Sigma * (self.Time_Step ** 0.5)).reshape(-1,1)
         Covs  = self.Row * np.matmul(Stds, Stds.T)
 
-        Returns = (np.exp(np.random.multivariate_normal(Means, Covs)) - 1) - (self.Rf * self.Time_Step)
-        self._Factor_Model_Returns = Returns
-        Net_Return = (1 + (self.Rf * self.Time_Step) + np.sum(Action * Returns))
+        self.Mkt_Return = (np.exp(np.random.multivariate_normal(Means, Covs)) - 1) - (self.Rf * self.Time_Step)
+        Net_Return = (1 + (self.Rf * self.Time_Step) + np.sum(Action * self.Mkt_Return))
 
         return Net_Return
 
