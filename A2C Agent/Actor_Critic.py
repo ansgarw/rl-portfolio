@@ -45,7 +45,7 @@ class Actor_Network :
         self.Mu = tf.layers.dense(Last_Layer, Output_Dim, activation = None, activity_regularizer = Alpha)
 
         Loglik = (tf.log(2 * np.pi * self.Sigma ** 2) / 2) + (0.5 * (self.Action - self.Mu) ** 2 / (self.Sigma ** 2))
-        Loss   = tf.matmul(tf.reshape(tf.reduce_sum(-Loglik, axis = 1), shape = [1,-1]), self.Advantage)
+        Loss   = tf.matmul(tf.reshape(tf.reduce_sum(Loglik, axis = 1), shape = [1,-1]), self.Advantage)
 
         self._Fit = self.Optimiser.minimize(Loss)
 
