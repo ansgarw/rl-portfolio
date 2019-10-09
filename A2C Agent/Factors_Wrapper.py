@@ -46,7 +46,7 @@ class Factors_Wrapper:
         for key in self.Plot:
             self.Plot_Data[key] = []
 
-        self.Agent.Train(N_Episodes, Plot = self.Plotting_Function)
+        self.Agent.Train(N_Episodes, self.Plotting_Function)
 
         if hasattr(self.Agent.Environment, 'Validate'):
             self.Plot_Data['Validate'] = self.Agent.Environment.Validate(100, self.Agent)
@@ -54,7 +54,7 @@ class Factors_Wrapper:
         self.Display()
 
 
-    def Plotting_Function (self, Exp, Episode_Exps):
+    def Plotting_Function (self, Episode_Exps):
 
         if 'Merton_Benchmark' in self.Plot_Data.keys():
             results = {'Agent'  : [],
@@ -74,31 +74,35 @@ class Factors_Wrapper:
 
         if 'Percent_Merton_Action' in self.Plot_Data.keys():
             Count = 0
+            Lenght = 0
+            for Exp in Episode_Exps:
+                Lenght += len(Exp)
+                for exp in Exp:
+                    if exp['Mu'][0] > self.Agent.Environment.Training_Merton * 0.9 and exp['Mu'][0] < self.Agent.Environment.Training_Merton * 1.1:
+                        Count += 1
 
-            for exp in Exp:
-                if exp['Mu'][0] > self.Agent.Environment.Training_Merton * 0.9 and exp['Mu'][0] < self.Agent.Environment.Training_Merton * 1.1:
-                    Count += 1
-
-            self.Plot_Data['Percent_Merton_Action'].append((Count / len(Exp)) * 100)
+            self.Plot_Data['Percent_Merton_Action'].append((Count / Lenght) * 100)
 
 
         if 'R_Squared' in self.Plot_Data.keys():
             Y_hat = []
             Y = []
-
-            for exp in Exp:
-                Y_hat.append(exp['Mu'][0] * self.Agent.Environment.Training_Var * self.Agent.Environment.Risk_Aversion)
-                Y.append(exp['i']['Mkt-Rf'])
+            for Exp in Episode_Exps:
+                for exp in Exp:
+                    Y_hat.append(exp['Mu'][0] * self.Agent.Environment.Training_Var * self.Agent.Environment.Risk_Aversion)
+                    Y.append(exp['i']['Mkt-Rf'])
 
             Y_hat = np.array(Y_hat)
             Y = np.array(Y)
 
+            # self.Plot_Data['R_Squared'].append(1 - (np.sum((Y - Y_hat) ** 2) / np.sum((Y - self.Agent.Environment.Training_Mean) ** 2)))
             self.Plot_Data['R_Squared'].append(1 - (np.sum((Y - Y_hat) ** 2) / np.sum((Y - np.mean(Y)) ** 2)))
 
 
         if 'Mu' in self.Plot_Data.keys():
-            for exp in Exp:
-                self.Plot_Data['Mu'].append(exp['Mu'])
+            for Exp in Episode_Exps:
+                for exp in Exp:
+                    self.Plot_Data['Mu'].append(exp['Mu'])
 
 
     def Display (self):
@@ -136,7 +140,7 @@ class Factors_Wrapper:
 
 
         if 'R_Squared' in self.Plot_Data.keys():
-            ax[i].scatter(np.arange(len(self.Plot_Data['R_Squared'])), self.Plot_Data['R_Squared'], color = 'darkblue')
+            ax[i].bar(np.arange(len(self.Plot_Data['R_Squared'])), self.Plot_Data['R_Squared'], color = 'darkblue')
             ax[i].set_xlabel('Model')
             ax[i].set_ylabel('R Squared')
             i += 1

@@ -229,7 +229,6 @@ class Actor_Critic:
         self.Gamma             = Gamma
         self.State_Dim         = Environment.observation_space.shape[0]
         self.Action_Dim        = Environment.action_space.shape[0]
-        self.Plot_Frequency    = 5
 
         self.Actor_Hypers  = Actor_Params
         self.Critic_Hypers = Critic_Params
@@ -267,6 +266,7 @@ class Actor_Critic:
 
         Exp = []
         Episode_Exps = []
+        Step_Count = 0
 
         for i in tqdm.tqdm(range(N_Episodes)):
             Done = False
@@ -277,18 +277,24 @@ class Actor_Critic:
             Actor_LR = self.Actor_Hypers["Learning Rate"] * (Sigma)
 
             while Done == False:
-                Mu = self.Actor.Predict(State_0.reshape(1, self.State_Dim))
+                Mu = np.clip(self.Actor.Predict(State_0.reshape(1, self.State_Dim)), -10, 10)
                 Leverage = np.random.normal(Mu, Sigma)
 
                 State_1, Reward, Done, Info = self.Environment.step(Leverage[0])
                 Episode_Exp.append({"s0" : State_0, "s1" : State_1, "r" : Reward, "a" : Leverage, 'i' : Info, 'Mu' : Mu.flatten()})
                 State_0 = State_1
+                Step_Count += 1
 
 
             for j in range(len(Episode_Exp) - 1)[::-1]:
                 Episode_Exp[j]["r"] += Episode_Exp[j+1]["r"] * self.Gamma
             Exp.extend(Episode_Exp)
             Episode_Exps.append(Episode_Exp)
+
+            if Step_Count > 10000:
+                Plot(Episode_Exps)
+                Episode_Exps = []
+                Step_Count = 0
 
 
             if i % self.Retrain_Frequency == 0:
@@ -301,9 +307,7 @@ class Actor_Critic:
                 self.Actor.Fit(State, Action, Advantage, Sigma)
                 self.Critic.Fit(State, Reward)
 
-                Plot(Exp, Episode_Exps)
                 Exp = []
-                Episode_Exps = []
 
 
     def Predict_Action (self, X):

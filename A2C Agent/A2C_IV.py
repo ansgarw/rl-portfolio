@@ -1,5 +1,10 @@
-import numpy as np
+import numpy             as np
+import matplotlib.pyplot as plt
 import tqdm
+
+from   scipy.optimize    import minimize, LinearConstraint
+
+
 
 # Version IV
 #   1. Updated the neural networks to use SGD
@@ -233,14 +238,14 @@ class Actor_Critic:
                                        Activation    = self.Actor_Hypers["Activation"],
                                        Epoch         = self.Actor_Hypers["Epoch"],
                                        Alpha         = self.Actor_Hypers["Alpha"],
-                                       Batch_Size    = self.Actor_Hypers["Batch_Size"])
+                                       Batch_Size    = self.Actor_Hypers["Batch Size"])
 
         self.Critic = Critic_NeuralNet(self.Critic_Hypers["Network Size"], self.State_Dim, 1,
                                        Learning_Rate = self.Critic_Hypers["Learning Rate"],
                                        Activation    = self.Critic_Hypers["Activation"],
                                        Epoch         = self.Critic_Hypers["Epoch"],
                                        Alpha         = self.Critic_Hypers["Alpha"],
-                                       Batch_Size    = self.Critic_Hypers["Batch_Size"])
+                                       Batch_Size    = self.Critic_Hypers["Batch Size"])
 
         self.Environment = Environment
 
@@ -388,7 +393,7 @@ class Actor_Critic:
             1. The Average utility across 100 episodes of the Merton Portfolio
 
         '''
-        results = {'AC'    : [],
+        results = {'AC'     : [],
                    'Merton' : []}
 
         for i in range(100):
@@ -450,5 +455,126 @@ class Actor_Critic:
 
 
 
-def Genrate_Plots (Plot_Data):
-    pass
+
+def Gen_Plots (Agent, Plot_Data):
+    '''
+    Generate and display plots
+
+    Parameters
+    ----------
+        Agent     : A copy of the trained agent.
+        Plot_Data : A dictionary with plot keys which contains the data to be plotted.
+
+    Returns nothing but displays the charts.
+    '''
+
+    if len(Plot_Data.keys()) == 0 : return None
+
+    N = len(Plot_Data.keys())
+    if 'Merton_Sim' in Plot_Data.keys() : N += 1
+    f, ax = plt.subplots(1,N, figsize = (6 * N, 6))
+    i = 0
+
+    if len(Plot_Data.keys()) == 1 : ax = [ax]
+
+
+    if 'Mu' in Plot_Data.keys():
+        ax[i].plot(np.array(Plot_Data['Mu']), label = 'Actions')
+        ax[i].set_xlabel('Step')
+        ax[i].set_ylabel('Leverage')
+        ax[i].axhline(Agent.Environment.Training_Merton, color = 'k')
+        i += 1
+
+    if 'Mu_2' in Plot_Data.keys():
+        ax[i].plot(np.array(Plot_Data['Mu_2']), label = 'Actions')
+        ax[i].set_xlabel('Step')
+        ax[i].set_ylabel('Leverage')
+        ax[i].axhline(Agent.Environment.Training_Merton, color = 'k')
+        i += 1
+
+    if 'Merton_Sim' in Plot_Data.keys():
+        assert isinstance(Agent.Environment.Mu, int) or isinstance(Agent.Environment.Mu, float), 'Merton_Sim only to be used with single asset.'
+
+        for j in range(len(Plot_Data['Merton_Sim'])):
+            ax[i].plot(np.linspace(0,1,20), Plot_Data['Merton_Sim'][j]["Policy"], label = Plot_Data['Merton_Sim'][j]["Title"])
+            ax[i+1].plot(np.linspace(0,1,20), Plot_Data['Merton_Sim'][j]["Value"],  label = Plot_Data['Merton_Sim'][j]["Title"])
+
+            ax[i].set_xlabel("Wealth")
+            ax[i].set_ylabel("Leverage")
+            ax[i].axhline(Agent.Environment.Training_Merton, color = 'k')
+            ax[i].legend()
+
+            ax[i+1].set_xlabel("Wealth")
+            ax[i+1].set_ylabel("Utility")
+            ax[i+1].legend()
+
+            if Agent.Environment.Risk_Aversion == 1:
+                ax[i+1].plot(np.linspace(0,1,20), [None] + list(np.log(np.linspace(0,1,20)[1::])), color = 'k')
+            else:
+                ax[i+1].plot(np.linspace(0,1,20), [None] + list((np.linspace(0,1,20)[1::] ** (1 - Agent.Environment.Risk_Aversion)) / (1 - Agent.Environment.Risk_Aversion)), color = 'k')
+        i += 2
+
+    if 'Greedy_Merton' in Plot_Data.keys():
+        Plot_Data['Greedy_Merton'] = np.array(Plot_Data['Greedy_Merton'])
+        ax[i].scatter(np.arange(Plot_Data['Greedy_Merton'].shape[0]), Plot_Data['Greedy_Merton'][:,0], label = 'AC', color = 'lightskyblue')
+        ax[i].scatter(np.arange(Plot_Data['Greedy_Merton'].shape[0]), Plot_Data['Greedy_Merton'][:,1], label = 'Merton', color = 'mediumvioletred')
+        ax[i].legend()
+        i += 1
+
+    if 'Percent_Merton_Action' in Plot_Data.keys():
+        ax[i].scatter(np.arange(len(Plot_Data['Percent_Merton_Action'])), Plot_Data['Percent_Merton_Action'], color = 'mediumvioletred')
+        i += 1
+
+
+
+    plt.show()
+
+
+
+
+
+# # Following functions calculate the merton fraction in a multi asset environment.
+# def Calculate_Merton_Weights(Env):
+#
+#     if hasattr(Env, 'Training_Merton'):
+#         return Env.Training_Merton
+#
+#     elif isinstance(Env.Mu, int) or isinstance(Env.Mu, float):
+#         return (Env.Mu - Env.Rf) / (Env.Risk_Aversion * (Env.Sigma ** 2))
+#
+#     else:
+#
+#         cons = [{'type': 'ineq', 'fun': lambda x:  np.sum(x) - 1},
+#                 {'type': 'ineq', 'fun': lambda x: -np.sum(x) + 1}]
+#
+#         Opt_Weights  = minimize(Sharpe_Ratio, [1 / len(Env.Mu)] * len(Env.Mu), args = (Env), constraints = cons).x
+#         Opt_leverage = Merton_Leverage(Opt_Weights, Env)
+#         Opt_Weights  = Opt_Weights * Opt_leverage
+#
+#         return Opt_Weights
+#
+# def Sharpe_Ratio(Weights, Env):
+#     Weights = np.array(Weights)
+#     Excess_ret = np.sum(Weights * Env.Mu) - Env.Rf
+#
+#     Std = Env.Sigma.reshape(-1,1)
+#     Cov = Env.Row * np.matmul(Std, Std.T)
+#
+#     Weights = Weights.reshape(-1,1)
+#     Var = np.matmul(np.matmul(Weights.T, Cov), Weights)
+#
+#     Sharpe = Excess_ret / (Var ** 0.5)[0,0]
+#
+#     return -Sharpe
+#
+# def Merton_Leverage(Weights, Env):
+#     Weights = np.array(Weights)
+#     Return = np.sum(Weights * Env.Mu)
+#
+#     Std = Env.Sigma.reshape(-1,1)
+#     Cov = Env.Row * np.matmul(Std, Std.T)
+#
+#     Weights = Weights.reshape(-1,1)
+#     Var = np.matmul(np.matmul(Weights.T, Cov), Weights)
+#
+#     return (Return - Env.Rf) / (Env.Risk_Aversion * (Var[0,0]))

@@ -134,6 +134,7 @@ class SimulatedEnv(gym.Env):
                 self.action_space    = gym.spaces.Box(low = self.Min_Leverage, high = self.Max_Leverage, shape = (1,), dtype = np.float32)
                 self.Training_Merton = (self.Mu - self.Rf) / (self.Risk_Aversion * (self.Sigma ** 2))
                 self.Training_Var    = self.Sigma ** 2
+                self.Training_Mean   = self.Mu
 
             else:
                 self.Return_Func  = self.Single_Asset_Factors
