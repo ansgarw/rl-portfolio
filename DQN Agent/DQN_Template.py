@@ -13,7 +13,7 @@ def Empty (*args):
     pass
 
 class DQN_Template:
-    
+
     def __init__(self, Environment, Gamma, Epsilon_Range, Epsilon_Anneal, Model, Action_Discretise, Retrain_Frequency):
         '''
         Parameters
@@ -60,10 +60,10 @@ class DQN_Template:
             the same agent. However perfered behaviour is to call this function only once as it ensures the agent slowly acts more
             optimally across the training sequence. (Epsilon will jump back to its inital value in subsequent calls to this function).
         '''
-        
+
         epsilons = self.Epsilon_Range[0] * np.ones(N_Episodes) - (1 / self.Epsilon_Anneal) * np.arange(0, N_Episodes) * (self.Epsilon_Range[0] - self.Epsilon_Range[1])
         epsilons = np.maximum(epsilons, self.Epsilon_Range[1])
-        Update_Exp  = []
+        Episode_Exps  = []
 
         for i in tqdm(range(N_Episodes)):
 
@@ -75,28 +75,28 @@ class DQN_Template:
                     Action_idx = np.random.choice(list(range(self.Action_Dim)))
                 else:
                     Action_idx = self.Choose_Action(State_0)[0]
-                    
+
                 State_1, Reward, Done, Info = self.Environment.step(self.Action_Space[Action_idx])
                 Episode_Exp.append({"s0" : State_0, "s1" : State_1, "r" : Reward, "a" : Action_idx, "i" : Info, "done" : Done, 'Mu' :self.Action_Space[Action_idx]})
                 State_0 = State_1
 
             self.Exp.extend(Episode_Exp)
-            Update_Exp.extend(Episode_Exp)
-            
+            Episode_Exps.append(Episode_Exp)
+
             if len(self.Exp) > self.Pool_Size:
                 self.Exp[0:len(Episode_Exp)] = []
 
             # Refit the model
             if i % self.Retrain_Frequency == 0:
                 self.Refit()
-                Plot(Update_Exp, Episode_Exp)
+                Plot(Episode_Exps)
 
     def Refit(self):
         pass
-    
+
     def Predict_Q(self, state):
         pass
-    
+
     def Choose_Action(self, state):
         pass
 
