@@ -111,7 +111,7 @@ class Actor_Critic (A2C_Template) :
 
         if self.Predict_Sigma == True:
             Sigma = self.TF_Session.run(self.Network.Predict_Sigma,  feed_dict = {self.Network.X: State.reshape(-1, self.State_Dim)})
-            Sigma = np.clip(Sigma, Sigma[1], Sigma[0])
+            Sigma = np.clip(Sigma, self.Sigma_Range[1], self.Sigma_Range[0])
         else:
             Sigma = np.array([self.Sigma])
 

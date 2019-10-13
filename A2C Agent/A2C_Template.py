@@ -32,9 +32,10 @@ class A2C_Template:
             Plot       : A list of plots which the function should return.
                          Accepted inputs include:
         '''
-
+        
+        self.N_Updates = N_Episodes/self.Retrain_Frequency
         Exp = []
-        Episode_Exps = []
+#        Episode_Exps = []
         Step_Count = 0
 
         for i in tqdm.tqdm(range(N_Episodes)):
@@ -47,18 +48,18 @@ class A2C_Template:
                 Action = np.random.normal(Mu, Sigma).flatten()
 
                 State_1, Reward, Done, Info = self.Environment.step(Action)
-                Episode_Exp.append({"s0" : State_0, "s1" : State_1, "r" : Reward, "a" : Action, 'i' : Info, 'Mu' : Mu.flatten(), 'Sigma' : Sigma.flatten()})
+                Episode_Exp.append({"s0" : State_0, "s1" : State_1, "r" : Reward, "a" : Action,'done':Done, 'i' : Info, 'Mu' : Mu.flatten(), 'Sigma' : Sigma.flatten()})
                 State_0 = State_1
                 Step_Count += 1
 
 
             Episode_Exp = self.BackProp_Reward(Episode_Exp)
-            Exp.extend(Episode_Exp)
-            Episode_Exps.append(Episode_Exp)
+#            Exp.extend(Episode_Exp)
+            Exp.append(Episode_Exp)
 
             if Step_Count > 10000:
-                Plot(Episode_Exps)
-                Episode_Exps = []
+                Plot(Exp)
+                Exp = []
                 Step_Count = 0
 
             if i % self.Retrain_Frequency == 0:

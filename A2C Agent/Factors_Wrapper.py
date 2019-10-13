@@ -153,7 +153,31 @@ class Factors_Wrapper:
             ax[i].set_xlabel('Validation Episode')
             ax[i].set_ylabel('Utility')
             ax[i].legend()
-
-
+    
 
         plt.show()
+
+
+    def Diagnos_Charts(self, show = 'Critic', factor = 3, low = -3, high = 3):
+        Base = np.zeros((100, self.Agent.State_Dim))
+        Base[:,0] = 1
+        Base[:,factor-1] = np.arange(low, high, (high - low)/100)
+        X = np.arange(low, high, (high - low)/100)
+        if show == 'Critic':
+            Y = self.Agent.TF_Session.run(self.Agent.Critic.Value_Pred, feed_dict = {self.Agent.Critic.X : Base})
+            plt.title('Value plot')
+        if show == 'Actor':
+            Y = self.Agent.TF_Session.run(self.Agent.Actor.Pred, feed_dict = {self.Agent.Actor.X : Base})
+            plt.title('Mu plot')
+        plt.plot(X, Y)
+        
+        
+        
+        
+        
+        
+        
+        
+
+
+
