@@ -65,8 +65,27 @@ class Critic_Network():
             
         self.Weights = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
         self.fit = self._Optimizer.minimize(V_Loss)
-
-
+        
+        
+class Critic_Polynomial():
+    def __init__(self, Input_Dim, power = 3):
+        self.X = tf.placeholder(shape = [None, Input_Dim], dtype = tf.float32, name = 'States')   
+        b = tf.Variable(tf.random_normal([1]), name = 'bias')
+        Y = 0
+        for i in range(power):
+            x_pow = tf.pow(self.X, i+1)
+            weights = tf.Variable(tf.random_normal([Input_Dim, 1]))
+            Y += tf.matmul(x_pow, weights)
+            
+        self.Value_Pred = Y + b
+        self.learning_rate = tf.placeholder(tf.float32, shape = (), name = 'Learning_rate')
+        self._Optimizer = tf.train.AdamOptimizer(learning_rate= self.learning_rate)
+        
+        self.V_in = tf.placeholder(shape = [None, 1], dtype = tf.float32, name = 'Output')
+        V_Loss = tf.losses.mean_squared_error(self.V_in, self.Value_Pred)
+        self.Weights = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
+        self.fit = self._Optimizer.minimize(V_Loss)
+            
 
 def Empty (*args):
     ''' An empty function which accepts any number of arguments '''
@@ -88,7 +107,7 @@ class Actor_Critic (A2C_Template):
                                    Alpha         = Actor_Hypers["Alpha"])
         
         self.Critic = Critic_Network(Critic_Hypers["Network Size"], self.State_Dim,Critic_Hypers["Alpha"])        
-        
+#        self.Critic = Critic_Polynomial(self.State_Dim, power = Critic_Hypers['power'])        
         self.Epoch = Actor_Hypers['Epoch']
         self.Base_LR = Actor_Hypers['Learning Rate']
         self.TF_Session   = tf.Session()
