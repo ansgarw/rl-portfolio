@@ -26,13 +26,13 @@ class Factors_Wrapper:
                                                        It will have lenght equivalent to the total number of steps in the
                                                        training episodes, and will have the same dimensions as the actionspace.
 
-                            4. Merton_Benchmark      : Plot the average utility of both the Merton Portfolio and the DQN across 100
+                            2. Merton_Benchmark      : Plot the average utility of both the Merton Portfolio and the DQN across 100
                                                        episodes (from the training dataset) acting greedily
 
-                            7. Percent_Merton_Action : Returns the fraction of actions recomended by the actor which are within
+                            3. Percent_Merton_Action : Returns the fraction of actions recomended by the actor which are within
                                                        10% of the merton portfolio action.
 
-                            8. R_Squared             : The optimal action independent of the state parameters is to hold the
+                            4. R_Squared             : The optimal action independent of the state parameters is to hold the
                                                        Merton Portfolio, hence any deviation from holding this portfolio may
                                                        be interperated as the expectation of excess return across the next period.
                                                        Thus assuming the moments of the asset to be constant the expected return
