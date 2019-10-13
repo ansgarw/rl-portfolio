@@ -167,7 +167,7 @@ class Factors_Wrapper:
             Y = self.Agent.TF_Session.run(self.Agent.Critic.Value_Pred, feed_dict = {self.Agent.Critic.X : Base})
             plt.title('Value plot')
         if show == 'Actor':
-            Y = self.Agent.TF_Session.run(self.Agent.Actor.Pred, feed_dict = {self.Agent.Actor.X : Base})
+            Y = self.Agent.TF_Session.run(self.Agent.Actor.Predict, feed_dict = {self.Agent.Actor.X : Base})
             plt.title('Mu plot')
         plt.plot(X, Y)
         
