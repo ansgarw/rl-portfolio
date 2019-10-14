@@ -175,7 +175,7 @@ class SimulatedEnv(gym.Env):
 
     def reset(self):
         # Must return an intial Observation
-        self.Wealth = np.random.uniform()
+        self.Wealth = np.clip(np.random.normal(1, 0.25), 0.25, 1.75)
         self.Tau    = self.Time_Horizon
         self.State  = np.array([self.Tau, self.Wealth])
 
@@ -267,7 +267,7 @@ class SimulatedEnv(gym.Env):
         else:
             Wealth = self.Wealth
 
-        if Wealth <= 0:
+        if np.any(Wealth <= 0):
             return -10
         elif self.Risk_Aversion == 1:
             return np.log(Wealth)
