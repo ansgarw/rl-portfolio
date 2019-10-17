@@ -95,7 +95,7 @@ def Empty (*args):
 
 class Actor_Critic (A2C_Template):
     
-    def __init__ (self, Environment, Actor_Hypers, Critic_Hypers, Gamma, Sigma_Range, Sigma_Anneal, Retrain_Frequency):
+    def __init__ (self, Environment, Actor_Hypers, Critic_Hypers, Gamma, Sigma_Range, Sigma_Anneal, Retrain_Frequency, Backprop = 'linear'):
 
         super().__init__(Environment, Gamma, Retrain_Frequency)
         self.Sigma_Range       = Sigma_Range
@@ -108,19 +108,24 @@ class Actor_Critic (A2C_Template):
         
         self.Critic = Critic_Network(Critic_Hypers["Network Size"], self.State_Dim,Critic_Hypers["Alpha"])        
 #        self.Critic = Critic_Polynomial(self.State_Dim, power = Critic_Hypers['power'])        
-        self.Epoch = Actor_Hypers['Epoch']
+        self.Actor_Epoch = Actor_Hypers['Epoch']
+        self.Critic_Epoch = Critic_Hypers['Epoch']
+        self.AC_Batch = Actor_Hypers['AC_Batches']
         self.Base_LR = Actor_Hypers['Learning Rate']
+        self.Critic_LR = Critic_Hypers['Learning Rate']
         self.TF_Session   = tf.Session()
         self.TF_Session.run(tf.global_variables_initializer())
         self._Current_Model = 0
         self.Sigma_Ceiling = Sigma_Range[0]
-        
+        self.Backprop = Backprop
 
     def BackProp_Reward(self, Episode_Exp):
         S0 = np.array([e['s0'] for e in Episode_Exp]).reshape((-1, self.State_Dim))
         S1 = np.array([e['s1'] for e in Episode_Exp]).reshape((-1, self.State_Dim))
         mark = np.array([e['done'] for e in Episode_Exp]).reshape(-1, 1)
         R = np.array([e['r'] for e in Episode_Exp]).reshape(-1, 1)
+        if self.Backprop == 'log':
+            R[-1] = np.log(R[-1])
         
         V_S0 = self.TF_Session.run(self.Critic.Value_Pred, feed_dict = {self.Critic.X: S0})
         V_S1 = self.TF_Session.run(self.Critic.Value_Pred, feed_dict = {self.Critic.X: S1})   
@@ -138,7 +143,7 @@ class Actor_Critic (A2C_Template):
         return Episode_Exp
     
     def Refit_Model (self, Experience):
-        self.Learning_Rate = self.Base_LR * self.Sigma_Ceiling
+        Learning_Rate = self.Base_LR * self.Sigma_Ceiling
         Exp = sum(Experience, [])
         S0 = np.array([e['s0'] for e in Exp]).reshape((-1, self.State_Dim))
         R = np.array([e['r'] for e in Exp]).reshape(-1, 1)
@@ -146,18 +151,23 @@ class Actor_Critic (A2C_Template):
         Sigmas = np.array([e['Sigma'] for e in Exp]).reshape(-1, self.Action_Dim) 
         Advantage = np.array([e['Advantage'] for e in Exp]).reshape(-1,1)
         
-        n = S0.shape[0]
-        ind = np.random.choice(n, size=(self.Epoch, n//self.Epoch), replace=False)
-        
-        for k in range(self.Epoch):
-            self.TF_Session.run(self.Actor.fit, feed_dict = {self.Actor.X:S0[ind[k],:], self.Actor.A_in:Actions[ind[k],:], 
-                            self.Actor.sigma_in: Sigmas[ind[k],:], self.Actor.Adv:Advantage[ind[k],:], self.Actor.learning_rate:self.Learning_Rate})    
-    
-            self.TF_Session.run(self.Critic.fit, feed_dict = {self.Critic.X:S0[ind[k],:], self.Critic.V_in: R[ind[k],:], self.Critic.learning_rate:self.Base_LR})    
+        n = len(Experience)
+        ind = np.random.choice(n, size=(self.AC_Batch, n//self.AC_Batch), replace=False)
+        for k in range(self.AC_Batch):
+            S_in = S0[ind[k], :]
+            A_in = Actions[ind[k], :]
+            Sig_in = Sigmas[ind[k], :]
+            Adv_in = Advantage[ind[k], :]
+            V_in = R[ind[k], :]
+            
+            for j in range(self.Actor_Epoch):
+                self.TF_Session.run(self.Actor.fit, feed_dict = {self.Actor.X:S_in, self.Actor.A_in:A_in, self.Actor.sigma_in: Sig_in, 
+                                                                 self.Actor.Adv:Adv_in, self.Actor.learning_rate: Learning_Rate})    
+            for j in range(self.Critic_Epoch):
+                self.TF_Session.run(self.Critic.fit, feed_dict = {self.Critic.X:S_in, self.Critic.V_in:V_in,  self.Critic.learning_rate:self.Critic_LR})    
             
         self._Current_Model += 1
         self.Sigma_Ceiling = max(self.Sigma_Range[0] - ((self.Sigma_Range[0] - self.Sigma_Range[1]) * (self._Current_Model / (self.Sigma_Anneal * self.N_Updates))), self.Sigma_Range[1])
-        
         
     def Predict_Action(self, state, oos = False):
         if self._Current_Model == 0:
@@ -170,6 +180,8 @@ class Actor_Critic (A2C_Template):
             if oos == False:
                 Sigma = np.clip(Sigma, self.Sigma_Range[1], self.Sigma_Ceiling)
             
+#        Mu = np.ones((1,self.Action_Dim))
+#        Sigma = np.zeros((1,self.Action_Dim))*self.Sigma_Range[0]
         return Mu, Sigma
     
 
