@@ -7,11 +7,18 @@ import os
 # If you mess it up just pull from the Git.
 # The first objective is to remove any use of pandas in the high frequency areas of the environment
 
+# Previous versions of the historical environment were bloated with default settings for a myriad of CSVs.
+# Now the enviornment has onde Defualt csv and may be overloaded with a different one by the user.
+
 # Global "Constants"
-_Daily_Filename   = os.path.realpath(__file__).replace("Historical.py", "PredictorDataDaily.csv")
-_Monthly_Filename = os.path.realpath(__file__).replace("Historical.py", "Monthly_Data_II.csv")
+_Default_Filename = os.path.realpath(__file__).replace("Historical.py", "Monthly_Data.csv")
 
 class HistoricalEnv(gym.Env):
+
+    '''
+    A gym environment used to train RL Portfolio management agents with historical data.
+    The environment comes with a default dataset, or another may be specified by the user.
+    '''
 
     def __init__ (self, **kwargs):
         '''
@@ -32,70 +39,32 @@ class HistoricalEnv(gym.Env):
             1. The environment must be reset after initialisation (by calling myEnv.reset())
         '''
 
-        assert kwargs['Time_Step'] in ("Daily", "Monthly"), "Episode_Length % not recognised, Please input Daily or Monthly"
-
         self.Time_Step           = kwargs['Time_Step']
         self.Risk_Aversion       = kwargs['Risk_Aversion']
         self.Episode_Length      = kwargs['Episode_Length']
         self.Max_Leverage        = kwargs['Max_Leverage']
         self.Min_Leverage        = kwargs['Min_Leverage']
         self.Validation_Frac     = kwargs['Validation_Frac']
-        self.Fama_Returns        = kwargs['Fama_Returns']
-        self.Technical_Data      = kwargs['Technical_Data']
         self.Intermediate_Reward = kwargs['Intermediate_Reward']
 
         # Flag used to distinguish a training episode from a validation epiodse, to facilitate cross val.
         self.isTraining = True
 
-        self.Wealth = np.random.uniform()
+        self.Wealth = np.clip(np.random.normal(1, 0.25), 0.25, 1.75)
         self.action_space = gym.spaces.Box(low = kwargs['Min_Leverage'], high = kwargs['Max_Leverage'], shape = (1,), dtype = np.float32)
 
+        # Set up the default dataset.
+        self.Data = pd.read_csv(_Default_Filename)
+        self.State_Parameters = ['D12', 'E12', 'DY', 'EY', 'DP', 'DE', 'svar', 'infl', 'AAA', 'BAA', 'lty', 'defaultspread', 'tbl',
+                                 'b/m', 'ntis', 'ltr', 'corpr', 'CRSP_SPvw', 'CRSP_SPvwx', 'Mom', 'HML', 'SMB']
 
-        # Read in the data...
-        if self.Time_Step == 'Daily':
-            self.Data = pd.read_csv(_Daily_Filename)
+        self.Data = self.Data[self.State_Parameters + ['Fama Mkt Excess', '1M TBill']]
+        self.Data.dropna(inplace = True)
+        self.Data.reset_index(drop = True, inplace = True)
 
-            # "Cross-Sectional Premium" has ~7000 missing entires vs the entire rest of the database which has 270.
-            self.Data.drop(columns = ['Cross-Sectional Premium'])
-            self.Data = self.Data.dropna()
-            self.Data['Mkt-RF'] = self.Data['Mkt-RF'] / 100
-            self.Data['Risk-Free Rate'] = self.Data['Risk-Free Rate'] / 100
-            self.Data = self.Data.reset_index(drop = True)
-
-            self.Return_Data = self.Data['Mkt-RF'].values
-            self.State_Data = list(self.Data.columns.values)
-            self.State_Data.remove('Unnamed: 0')
-            self.State_Data = self.Data[self.State_Data].values
-            self.Rf = self.Data['Risk-Free Rate'].values
-
-
-        elif self.Time_Step == 'Monthly':
-            self.Data = pd.read_csv(_Monthly_Filename)
-            self.State_Parameters = ['D12', 'E12', 'DY', 'EY', 'DP', 'DE', 'svar', 'infl', 'AAA', 'BAA', 'lty', 'defaultspread', 'tbl',
-                                     'b/m', 'ntis', 'ltr', 'corpr', 'CRSP_SPvw', 'CRSP_SPvwx', 'Mom', 'HML', 'SMB']
-
-            if self.Technical_Data == True:
-                for i in range(28):
-                    self.State_Parameters.extend(['Mkt-RF day ' + str(i), 'HML day ' + str(i), 'SMB day ' + str(i)])
-
-
-            if self.Fama_Returns == True:
-                self.Data = self.Data[self.State_Parameters + ['Fama Mkt Excess', '1M TBill']]
-                self.Data.dropna(inplace = True)
-                self.Data.reset_index(drop = True, inplace = True)
-
-                self.Return_Data = self.Data['Fama Mkt Excess'].values
-                self.State_Data  = self.Data[self.State_Parameters].values
-                self.Rf          = self.Data['1M TBill'].values
-
-            else:
-                self.Data = self.Data[self.State_Parameters + ['Return', 'Rfree']]
-                self.Data.dropna(inplace = True)
-                self.Data.reset_index(drop = True, inplace = True)
-
-                self.Return_Data = (self.Data['Return'] - self.Data['Rfree']).values
-                self.State_Data  = self.Data[self.State_Parameters].values
-                self.Rf          = self.Data['Rfree'].values
+        self.Return_Data = self.Data['Fama Mkt Excess'].values
+        self.State_Data  = self.Data[self.State_Parameters].values
+        self.Rf          = self.Data['1M TBill'].values
 
 
         # Plus two as wealth and tau are also part of the state space.
@@ -110,15 +79,35 @@ class HistoricalEnv(gym.Env):
 
         Parameters
         ----------
-            Episode_Length      : The length of an episode, measured in Time_Step(s)
+            Episode_Length      : The length of an episode, measured in steps
             Risk_Aversion       : The risk aversion of the agent
             Max_Leverage        : The maximum leverage that the bot may take without triggering an error
             Min_Leverage        : The minimum leverage that the bot may take without triggering an error
             Validation_Frac     : The holdout fraction of the dataset.
             Intermediate_Reward : A flag to indicate whether the environment should return inter-episode rewards.
             State_Parameters    : A list of the parameters to be used to construct the state.
-            Fama_Returns        : (Boolean) The environment may either use Fama French market wide excess return, or S&P Index Return (Monthly Only.) (Defualt True)
-            Technical_Data      : (Boolean) A flag to indiciate whether daily returns for the Fama Mkt should be included. (Defualt False)
+            Return_Key          : The key of the column to be used as returns.
+            Risk_Free_Key       : The key of the column to be used as the risk free return.
+            Time_Step           : Time_Step
+
+            DataBase            : A pandas dataframe containing the data to use. If this is overloaded, State_Parameters, Return_Key and Risk_Free_Key
+                                  must also be specified.
+
+
+
+        Default Dataset Keys
+        --------------------
+
+        Excess Return
+        -------------
+            Fama Mkt Excess  - Excess market return by Fama
+            Return           - Excess return on the S&P500 Index
+
+
+        Risk Free Rate
+        --------------
+            Rfree      - Risk free rate (source unknown, from original predictorData)
+            1M TBill   - Fama french one month T Bill return.
 
 
         State_Parameters
@@ -147,57 +136,52 @@ class HistoricalEnv(gym.Env):
         self.Min_Leverage        = kwargs['Min_Leverage']        if 'Min_Leverage'        in kwargs.keys() else self.Min_Leverage
         self.Validation_Frac     = kwargs['Validation_Frac']     if 'Validation_Frac'     in kwargs.keys() else self.Validation_Frac
         self.Intermediate_Reward = kwargs['Intermediate_Reward'] if 'Intermediate_Reward' in kwargs.keys() else self.Intermediate_Reward
-        self.Technical_Data      = kwargs['Technical_Data']      if 'Technical_Data'      in kwargs.keys() else self.Technical_Data
-        self.Fama_Returns        = kwargs['Fama_Returns']        if 'Fama_Returns'        in kwargs.keys() else self.Fama_Returns
-        self.State_Parameters    = kwargs['State_Parameters']    if 'State_Parameters'    in kwargs.keys() else self.State_Parameters
 
-        if self.Time_Step == 'Monthly':
-            if 'State_Parameters' in kwargs.keys() or 'Technical_Data' in kwargs.keys():
+        if 'DataBase' in kwargs.keys():
+            assert set(['Return_Key', 'Risk_Free_Key', 'State_Parameters']).issubset(set(kwargs.keys())), 'Please specify State_Parameters, Return_Key and Risk_Free_Key when using a custom database.'
 
-                if self.Technical_Data == True:
-                    for i in range(28):
-                        self.State_Parameters.extend(['Mkt-RF day ' + str(i), 'HML day ' + str(i), 'SMB day ' + str(i)])
+            if 'Time_Step' in kwargs.keys() : self.Time_Step = kwargs['Time_Step']
 
-                self.Data = pd.read_csv(_Monthly_Filename)
+            # Set up the new dataset.
+            self.Data = kwargs['DataBase']
+            self.State_Parameters = kwargs['State_Parameters']
+            self.Data = self.Data[self.State_Parameters + [kwargs['Return_Key'], kwargs['Risk_Free_Key']]]
 
-                if self.Fama_Returns == True:
-                    Params = self.State_Parameters
-                    if not 'Fama Mkt Excess' in Params : Params.append('Fama Mkt Excess')
-                    if not '1M TBill' in Params : Params.append('1M TBill')
+            self.Data.dropna(inplace = True)
+            self.Data.reset_index(drop = True, inplace = True)
 
-                    self.Data = self.Data[Params]
-                    self.Data.dropna(inplace = True)
-                    self.Data.reset_index(drop = True, inplace = True)
+            self.Return_Data = self.Data[kwargs['Return_Key']].values
+            self.State_Data  = self.Data[self.State_Parameters].values
+            self.Rf          = self.Data[kwargs['Risk_Free_Key']].values
 
-                    self.Return_Data = self.Data['Fama Mkt Excess'].values
-                    self.State_Data  = self.Data[self.State_Parameters].values
-                    self.Rf          = self.Data['1M TBill'].values
 
-                else:
-                    Params = self.State_Parameters
-                    if not 'Return' in Params : Params.append('Return')
-                    if not 'Rfree' in Params : Params.append('Rfree')
+        # Now check if any of the state data needs overloading with the default data
+        elif ('State_Parameters' in kwargs.keys()) or ('Return_Key' in kwargs.keys()) or ('Risk_Free_Key' in kwargs.keys()):
 
-                    self.Data = self.Data[list(Params)]
-                    self.Data.dropna(inplace = True)
-                    self.Data.reset_index(drop = True, inplace = True)
+            self.State_Parameters = kwargs['State_Parameters'] if 'State_Parameters' in kwargs.keys() else self.State_Parameters
+            Return_Key            = kwargs['Return_Key']       if 'Return_Key'       in kwargs.keys() else 'Fama Mkt Excess'
+            Risk_Free_Key         = kwargs['Risk_Free_Key']    if 'Risk_Free_Key'    in kwargs.keys() else '1M TBill'
 
-                    self.Return_Data = (self.Data['Return'] - self.Data['Rfree']).values
-                    self.State_Data  = self.Data[self.State_Parameters].values
-                    self.Rf          = self.Data['Rfree'].values
+            self.Data = pd.read_csv(_Default_Filename)
+            self.Data = self.Data[self.State_Parameters + [Return_Key, Risk_Free_Key]]
 
+            self.Data.dropna(inplace = True)
+            self.Data.reset_index(drop = True, inplace = True)
+
+            self.Return_Data = self.Data[Return_Key].values
+            self.State_Data  = self.Data[self.State_Parameters].values
+            self.Rf          = self.Data[Risk_Free_Key].values
 
         self.action_space = gym.spaces.Box(low = self.Min_Leverage, high = self.Max_Leverage, shape = (1,), dtype = np.float32)
         self.observation_space = gym.spaces.Box(low = np.array([-np.inf] * (self.State_Data.shape[1] + 2)), high = np.array([np.inf] * (self.State_Data.shape[1] + 2)), dtype = np.float32)
 
 
         for key in kwargs.keys():
-            if not key in ('Risk_Aversion', 'Episode_Length', 'Max_Leverage', 'Min_Leverage', 'Validation_Frac', 'Intermediate_Reward', 'Fama_Returns',
-                           'State_Parameters', 'Technical_Data'):
+            if not key in ('Risk_Aversion', 'Episode_Length', 'Max_Leverage', 'Min_Leverage', 'Validation_Frac', 'Intermediate_Reward', 'DataBase', 'State_Parameters', 'Return_Key', 'Risk_Free_Key', 'Time_Step'):
                 print("Keyword:", key, "not recognised.")
 
-        if "Time_Step" in kwargs.keys():
-            warnings.warn("Time_Step may not be changed, please use the daily/monthly environment")
+        if "Time_Step" in kwargs.keys() and not 'DataBase' in kwargs.keys():
+            warnings.warn("Time_Step may not be changed unless the database is overridden")
 
         if self.Risk_Aversion != 1 and self.Intermediate_Reward == True:
             warnings.warn("Intermediate Reward as no effect when Risk Aversion is not equal to one.")
@@ -244,7 +228,7 @@ class HistoricalEnv(gym.Env):
         if self.isTraining == True:
             Possible_Indexes = np.append(np.arange(self.Validation_Start - self.Episode_Length), np.arange(self.Validation_End, self.State_Data.shape[0] - self.Episode_Length))
             self.Start_Index = np.random.choice(Possible_Indexes)
-            self.Wealth = np.random.uniform()
+            self.Wealth = np.clip(np.random.normal(1, 0.25), 0.25, 1.75)
         else:
             self.Start_Index = np.random.randint(low = self.Validation_Start, high = self.Validation_End - self.Episode_Length)
             # When validating we want to start each epsiode with the same wealth, as this makes the terminal utility comparable.
@@ -313,7 +297,7 @@ class HistoricalEnv(gym.Env):
 
     def Gen_State (self):
         ''' Genrates a state array '''
-        Tau = (self.End_Index - self.Index) / (252 if self.Time_Step == 'Daily' else 12)
+        Tau = (self.End_Index - self.Index) / (1 / self.Time_Step)
         return np.append([self.Wealth, Tau], self.State_Data[self.Index])
 
 

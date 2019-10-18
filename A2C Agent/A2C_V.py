@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import tqdm
 import warnings
 
+# Pull from the git if it breaks, last pushed morning 14th Oct
+
 
 def Empty (*args):
     ''' An empty function which accepts any number of arguments '''
@@ -128,7 +130,6 @@ class Critic_NeuralNet:
 
             self.Forward_Pass(X)
             self.BackProp(X, Y)
-
 
 
 # A Neural Network, with custom loss function for Mu only policy gradient
@@ -312,12 +313,10 @@ class Actor_Critic:
                 Leverage = np.random.normal(Mu, Sigma)
 
                 State_1, Reward, Done, Info = self.Environment.step(Leverage[0])
-                Episode_Exp.append({"s0" : State_0, "s1" : State_1, "r" : Reward, "a" : Leverage, 'i' : Info, 'Mu' : Mu.flatten()})
+                Episode_Exp.append({"s0" : State_0, "s1" : State_1, "r" : Reward, "a" : Leverage, 'i' : Info, 'Mu' : Mu.flatten(), 'd' : Done})
                 State_0 = State_1
                 Step_Count += 1
 
-            for j in range(len(Episode_Exp) - 1)[::-1]:
-                Episode_Exp[j]['r'] = Episode_Exp[j]['r'] + Episode_Exp[j+1]['r'] * self.Gamma
             Exp.extend(Episode_Exp)
             Episode_Exps.append(Episode_Exp)
 
@@ -327,33 +326,32 @@ class Actor_Critic:
                 Step_Count = 0
 
             if i % self.Retrain_Frequency == 0:
-                State     = np.array([e['s0'] for e in Exp]).reshape((-1, self.State_Dim))
-                Action    = np.array([e['a']  for e in Exp]).reshape((-1, self.Action_Dim))
-                Reward    = np.array([e['r']  for e in Exp]).reshape((-1, 1))
-                Advantage = Reward - self.Critic.Predict(State)
+                State_0 = np.array([e['s0'] for e in Exp]).reshape((-1, self.State_Dim))
+                State_1 = np.array([e['s1'] for e in Exp]).reshape((-1, self.State_Dim))
+                Action  = np.array([e['a']  for e in Exp]).reshape((-1, self.Action_Dim))
+                Reward  = np.array([e['r']  for e in Exp]).reshape((-1, 1))
+                Done    = np.array([e['d']  for e in Exp]).reshape((-1, 1)).astype(int)
+                Value   = Reward + self.Gamma * Done * self.Critic.Predict(State_1)
+
+                Advantage = Value - self.Critic.Predict(State_0)
 
                 if self.MiniBatch_Size == 0:
-                    self.Actor.Fit(State, Action, Advantage, Sigma, LR_Mult = Sigma)
-                    self.Critic.Fit(State, Reward)
+                    self.Actor.Fit(State_0, Action, Advantage, Sigma, LR_Mult = Sigma)
+                    self.Critic.Fit(State_0, Value)
 
                 else:
-                    idx = np.random.choice(State.shape[0], size = (State.shape[0] // self.MiniBatch_Size, self.MiniBatch_Size), replace = False)
+                    idx = np.random.choice(State_0.shape[0], size = (State_0.shape[0] // self.MiniBatch_Size, self.MiniBatch_Size), replace = False)
                     for i in range(idx.shape[0]):
-                        self.Actor.Fit(State[idx[i]], Action[idx[i]], Advantage[idx[i]], Sigma, LR_Mult = Sigma)
-                        self.Critic.Fit(State[idx[i]], Reward[idx[i]])
+                        self.Actor.Fit(State_0[idx[i]], Action[idx[i]], Advantage[idx[i]], Sigma, LR_Mult = Sigma)
+                        self.Critic.Fit(State_0[idx[i]], Reward[idx[i]])
 
                 Exp = []
 
 
     def Predict_Action (self, X):
         ''' Returns the optimal action given a state '''
-        return self.Actor.Predict(X.reshape(1, self.State_Dim))
+        return self.Actor.Predict(X.reshape(-1, self.State_Dim))
 
 
-# Cyclical LR requires 3 new paramters:
-# 1. Max_LR
-# 2. Min_LR
-# 3. LR Cycle Size
-
-# The actor's learning rate is already controlled from within the AC, If this is implmented the Networks will have
-# to keep track of their own LRs and the Actor should accept an optional LR Mult so its cyclcial LR can also be slowly decaying.
+    def Predict_Value (self, X):
+        return self.Critic.Predict(X.reshape(-1,self.State_Dim))

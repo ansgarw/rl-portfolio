@@ -8,8 +8,10 @@ class Factors_Wrapper:
     and to evalaute the ability of the agents to outperform the merton portfolio using ecconomic factors
     '''
 
-    def __init__ (self, Agent):
+    def __init__ (self, Agent, Diagnostics = []):
         self.Agent = Agent
+
+        self.Diagnostics = Diagnostics
 
 
     def Train (self, N_Episodes, Plot = []):
@@ -45,6 +47,9 @@ class Factors_Wrapper:
         self.Plot_Data = {}
         for key in self.Plot:
             self.Plot_Data[key] = []
+
+        for i in range(len(self.Diagnostics)):
+            self.Plot_Data['Diag' + str(i)] = []
 
         self.Agent.Train(N_Episodes, self.Plotting_Function)
 
@@ -105,6 +110,12 @@ class Factors_Wrapper:
                     self.Plot_Data['Mu'].append(exp['Mu'])
 
 
+        if len(self.Diagnostics) > 0:
+            for i, Diag in enumerate(self.Diagnostics):
+                X, Y = self.Run_Diagnostics(Diag['Module'], Diag['Factor'])
+                self.Plot_Data['Diag' + str(i)].append([X, Y])
+
+
     def Display (self):
         ''' Display the data '''
 
@@ -113,6 +124,11 @@ class Factors_Wrapper:
         if len(self.Plot_Data.keys()) == 1 : ax = [ax]
         i = 0
 
+        for j in range(len(self.Diagnostics)):
+            for Data in self.Plot_Data['Diag' + str(j)]:
+                ax[i].plot(Data[0], Data[1])
+                ax[i].set_title('Diag: ' + self.Diagnostics[j]['Module'] + ', Factor: ' + str(self.Diagnostics[j]['Factor']))
+            i += 1
 
         if 'Mu' in self.Plot_Data.keys():
             ax[i].plot(np.array(self.Plot_Data['Mu']), label = 'Actions')
@@ -153,11 +169,33 @@ class Factors_Wrapper:
             ax[i].set_xlabel('Validation Episode')
             ax[i].set_ylabel('Utility')
             ax[i].legend()
-    
+
 
         plt.show()
 
 
+    def Run_Diagnostics (self, Module, Factor):
+        State = np.zeros((25, self.Agent.State_Dim))
+        State[:,0] = 1
+        State[:,1] = 0.5
+        State[:,Factor] = np.linspace(-2,2,25)
+
+        if Module == 'Actor':
+            Y = self.Agent.Predict_Action(State).flatten()
+        elif Module == 'Critic':
+            Y = self.Agent.Predict_Value(State).flatten()
+        else:
+            warnings.warn('Diagnostics Module not recognised')
+            return [None, None]
+
+        return np.linspace(-2,2,25), Y
+
+
+
+
+
+
+    # Only works with some TF ACs, depricated.
     def Diagnos_Charts(self, show = 'Critic', factor = 3, low = -3, high = 3):
         Base = np.zeros((100, self.Agent.State_Dim))
         Base[:,0] = 1
@@ -170,14 +208,3 @@ class Factors_Wrapper:
             Y = self.Agent.TF_Session.run(self.Agent.Actor.Predict, feed_dict = {self.Agent.Actor.X : Base})
             plt.title('Mu plot')
         plt.plot(X, Y)
-        
-        
-        
-        
-        
-        
-        
-        
-
-
-
