@@ -188,9 +188,9 @@ class Multihead_NP:
 
 
 
-class DQN_MH_NP(DQN_Template):
+class DQN_MH(DQN_Template):
 
-    def __init__ (self, Environment, Action_Discretise, Network_Params, Gamma = 0.99, Epsilon_Range = [1, 0.1], Epsilon_Anneal = 0.5, Retrain_Frequency = 25):
+    def __init__ (self, Environment, Action_Discretise, Network_Params, Gamma = 0.98, Epsilon_Range = [1, 0.1], Epsilon_Anneal = 0.5, Retrain_Frequency = 25):
 
         '''
         Parameters
@@ -229,9 +229,9 @@ class DQN_MH_NP(DQN_Template):
                                Activation    = Network_Params["Activation"],
                                Epoch         = Network_Params["Epoch"],
                                Alpha         = Network_Params["Alpha"],
-                               Batch_Size    = Network_Params["Batch_Size"])
+                               Batch_Size    = Network_Params["Batch Size"])
 
-        self.Sample_size = Network_Params['Epoch'] * Network_Params['Batch_Size']
+        self.Sample_size = Network_Params['Epoch'] * Network_Params['Batch Size']
         super().__init__(Environment, Gamma, Epsilon_Range, Epsilon_Anneal, Model, Action_Discretise, Retrain_Frequency)
 
     def Refit(self):
