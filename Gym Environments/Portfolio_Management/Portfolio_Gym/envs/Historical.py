@@ -3,6 +3,8 @@ import pandas as pd
 import warnings
 import gym
 import os
+from scipy.optimize import minimize
+
 
 # If you mess it up just pull from the Git.
 # The first objective is to remove any use of pandas in the high frequency areas of the environment
@@ -22,21 +24,8 @@ class HistoricalEnv(gym.Env):
 
     def __init__ (self, **kwargs):
         '''
-        Parameters
-        ----------
-        kwargs includes:
-            Time_Step      : Options include "Daily" or "Monthly", refers to the database to use for training.
-            Episode_Length : The length of an episode, measured in Time_Step(s)
-            Risk_Aversion  : The risk aversion of the agent
-            Max_Leverage   : The maximum leverage that the bot may take without triggering an error
-            Min_Leverage   : THe minimum leverage that the bot may take without triggering an error
-            Fama_Returns   : (Boolean) The environment may either use Fama French market wide excess return, or S&P Index Return (Monthly Only.) (Defualt True)
-            Technical_Data : (Boolean) A flag to indiciate whether daily returns for the Fama Mkt should be included. (Defualt False)
-
-
-        Notes
-        -----
-            1. The environment must be reset after initialisation (by calling myEnv.reset())
+        Initialise the class.
+        Since user arguments can no longer be passed to gym.make, Set_Params must be called subsequently to overwrite the default arguments.
         '''
 
         self.Time_Step           = kwargs['Time_Step']
@@ -59,16 +48,17 @@ class HistoricalEnv(gym.Env):
                                  'b/m', 'ntis', 'ltr', 'corpr', 'CRSP_SPvw', 'CRSP_SPvwx', 'Mom', 'HML', 'SMB']
 
         self.Data = self.Data[self.State_Parameters + ['Fama Mkt Excess', '1M TBill']]
-        self.Data.dropna(inplace = True)
+        self.Data = self.Data.dropna()
         self.Data.reset_index(drop = True, inplace = True)
 
-        self.Return_Data = self.Data['Fama Mkt Excess'].values
-        self.State_Data  = self.Data[self.State_Parameters].values
-        self.Rf          = self.Data['1M TBill'].values
+        self.Return_Data = self.Data['Fama Mkt Excess'].values.reshape(-1,1)
+        self.State_Data  = self.Data[self.State_Parameters].values.reshape(-1, len(self.State_Parameters))
+        self.Rf          = self.Data['1M TBill'].values.reshape(-1,1)
 
 
         # Plus two as wealth and tau are also part of the state space.
         self.observation_space = gym.spaces.Box(low = np.array([-np.inf] * (self.State_Data.shape[1] + 2)), high = np.array([np.inf] * (self.State_Data.shape[1] + 2)), dtype = np.float32)
+        self.action_space = gym.spaces.Box(low = np.array([self.Min_Leverage]), high = np.array([self.Max_Leverage]), dtype = np.float32)
         self.Reset_Validation_Data()
 
 
@@ -79,19 +69,42 @@ class HistoricalEnv(gym.Env):
 
         Parameters
         ----------
-            Episode_Length      : The length of an episode, measured in steps
-            Risk_Aversion       : The risk aversion of the agent
-            Max_Leverage        : The maximum leverage that the bot may take without triggering an error
-            Min_Leverage        : The minimum leverage that the bot may take without triggering an error
-            Validation_Frac     : The holdout fraction of the dataset.
-            Intermediate_Reward : A flag to indicate whether the environment should return inter-episode rewards.
-            State_Parameters    : A list of the parameters to be used to construct the state.
-            Return_Key          : The key of the column to be used as returns.
-            Risk_Free_Key       : The key of the column to be used as the risk free return.
-            Time_Step           : Time_Step
 
-            DataBase            : A pandas dataframe containing the data to use. If this is overloaded, State_Parameters, Return_Key and Risk_Free_Key
-                                  must also be specified.
+
+            Risk_Aversion | float
+                The investors risk aversion, which is used to generate utility
+
+            Validation_Frac | float
+                The fraction of the data to be kept aside for out of sample validation (Default 0.3)
+
+            Min_Leverage | float
+                The smallest leverage which the agent may take. Must be negative to allow the agent too short.
+
+            Max_Leverage | float
+                The highest leverage that the agent may take
+
+            Episode_Length | int
+                The number of steps that an episode should consist of. (Time horizon and step are no longer used as period is a property of the underlying VAR model.)
+
+            Intermediate_Rewards | bool
+                A flag indicating whether the environment will return intermediate rewards. Note for this parameter to have an effect Risk_Aversion must equal one, or it will default to false. Intermediate_Reward are calculated as the increase in utility across the step.
+
+            Time_Step | float
+                The length of time that one step through the database corresponds to. Cannot be overwritten unless a custom database is being used.
+
+
+
+            State_Parameters | list
+                A list of the parameters to be used to construct the state. (list of parameters availiable in the default database below)
+
+            Return_Key | string, list
+                The key of the column to be used as returns. If a list is passed then the environment will run with multiple assets. (list of parameters availiable in the default database below)
+
+            Risk_Free_Key | string
+                The key of the column to be used as the risk free return. (list of parameters availiable in the default database below)
+
+            DataBase | pandas.DataFrame
+                A pandas dataframe containing a custom database if desired. If this is overloaded, State_Parameters, Return_Key and Risk_Free_Key must also be specified.
 
 
 
@@ -145,18 +158,30 @@ class HistoricalEnv(gym.Env):
             # Set up the new dataset.
             self.Data = kwargs['DataBase']
             self.State_Parameters = kwargs['State_Parameters']
-            self.Data = self.Data[self.State_Parameters + [kwargs['Return_Key'], kwargs['Risk_Free_Key']]]
 
-            self.Data.dropna(inplace = True)
-            self.Data.reset_index(drop = True, inplace = True)
+            if isinstance(kwargs['Return_Key'], list):
+                self.Data = self.Data[self.State_Parameters + kwargs['Return_Key'] + [kwargs['Risk_Free_Key']]]
+                self.Data = self.Data.dropna()
+                self.Data.reset_index(drop = True, inplace = True)
 
-            self.Return_Data = self.Data[kwargs['Return_Key']].values
-            self.State_Data  = self.Data[self.State_Parameters].values
-            self.Rf          = self.Data[kwargs['Risk_Free_Key']].values
+                self.Return_Data = self.Data[kwargs['Return_Key']].values.reshape(-1, len(kwargs['Return_Key']))
+                self.State_Data  = self.Data[self.State_Parameters].values.reshape(-1, len(self.State_Parameters))
+                self.Rf          = self.Data[kwargs['Risk_Free_Key']].values.reshape(-1, 1)
+
+            else:
+                self.Data = self.Data[self.State_Parameters + [kwargs['Return_Key'], kwargs['Risk_Free_Key']]]
+                self.Data = self.Data.dropna()
+                self.Data.reset_index(drop = True, inplace = True)
+
+                self.Return_Data = self.Data[kwargs['Return_Key']].values.reshape(-1,1)
+                self.State_Data  = self.Data[self.State_Parameters].values.reshape(-1, len(self.State_Parameters))
+                self.Rf          = self.Data[kwargs['Risk_Free_Key']].values.reshape(-1, 1)
 
 
         # Now check if any of the state data needs overloading with the default data
         elif ('State_Parameters' in kwargs.keys()) or ('Return_Key' in kwargs.keys()) or ('Risk_Free_Key' in kwargs.keys()):
+
+            assert not isinstance(kwargs["Return_Key"], list), 'Multiple assets may not be used with default database.'
 
             self.State_Parameters = kwargs['State_Parameters'] if 'State_Parameters' in kwargs.keys() else self.State_Parameters
             Return_Key            = kwargs['Return_Key']       if 'Return_Key'       in kwargs.keys() else 'Fama Mkt Excess'
@@ -165,14 +190,15 @@ class HistoricalEnv(gym.Env):
             self.Data = pd.read_csv(_Default_Filename)
             self.Data = self.Data[self.State_Parameters + [Return_Key, Risk_Free_Key]]
 
-            self.Data.dropna(inplace = True)
+            self.Data = self.Data.dropna()
             self.Data.reset_index(drop = True, inplace = True)
 
-            self.Return_Data = self.Data[Return_Key].values
-            self.State_Data  = self.Data[self.State_Parameters].values
-            self.Rf          = self.Data[Risk_Free_Key].values
+            self.Return_Data = self.Data[Return_Key].values.reshape(-1,1)
+            self.State_Data  = self.Data[self.State_Parameters].values.reshape(-1, len(self.State_Parameters))
+            self.Rf          = self.Data[Risk_Free_Key].values.reshape(-1,1)
 
-        self.action_space = gym.spaces.Box(low = self.Min_Leverage, high = self.Max_Leverage, shape = (1,), dtype = np.float32)
+
+        self.action_space = gym.spaces.Box(low = np.array([self.Min_Leverage] * self.Return_Data.shape[1]), high = np.array([self.Max_Leverage] * self.Return_Data.shape[1]), dtype = np.float32)
         self.observation_space = gym.spaces.Box(low = np.array([-np.inf] * (self.State_Data.shape[1] + 2)), high = np.array([np.inf] * (self.State_Data.shape[1] + 2)), dtype = np.float32)
 
 
@@ -184,7 +210,7 @@ class HistoricalEnv(gym.Env):
             warnings.warn("Time_Step may not be changed unless the database is overridden")
 
         if self.Risk_Aversion != 1 and self.Intermediate_Reward == True:
-            warnings.warn("Intermediate Reward as no effect when Risk Aversion is not equal to one.")
+            print("Warning: Intermediate Reward as no effect when Risk Aversion is not equal to one.")
 
         self.Reset_Validation_Data()
 
@@ -195,34 +221,40 @@ class HistoricalEnv(gym.Env):
 
         Parameters
         ----------
-            Set_last : A boolean indicating whether the validation set should be the last x percent of the dataset.
+            Set_last | bool
+                Indicates whether the validation set should be the last x percent of the dataset.
         '''
 
         if Set_last == False:
             self.Validation_Start = np.random.randint(low = self.Episode_Length, high = (self.State_Data.shape[0] * (1 - self.Validation_Frac)) - self.Episode_Length)
-            self.Validation_End   = self.Validation_Start + int(self.Data.shape[0] * self.Validation_Frac)
+            self.Validation_End   = self.Validation_Start + int(self.State_Data.shape[0] * self.Validation_Frac)
         else:
             self.Validation_Start = int(self.State_Data.shape[0] * (1 - self.Validation_Frac))
             self.Validation_End   = int(self.State_Data.shape[0])
 
-        Mean = np.mean(np.append(self.Return_Data[0:self.Validation_Start], self.Return_Data[self.Validation_End:]))
-        Vars = np.var(np.append(self.Return_Data[0:self.Validation_Start], self.Return_Data[self.Validation_End:]))
+        Mean = np.mean(np.vstack((self.Return_Data[0:self.Validation_Start], self.Return_Data[self.Validation_End:])), axis = 0)
+        Vars = np.var(np.vstack((self.Return_Data[0:self.Validation_Start], self.Return_Data[self.Validation_End:])), axis = 0)
 
-        self.Training_Merton = Mean / (Vars * self.Risk_Aversion)
         self.Training_Var    = Vars
         self.Training_Mean   = Mean
+        self.Training_Merton = self.Merton_Fraction()
 
 
     def reset (self):
-        '''
-        Resets the environment
 
-        Returns : The intial state after resetting
+        '''
+        Resets the environment so a new episode may be ran. Must be called by the user / agent to begin an episode.
+
+        Returns
+        -------
+            Oberservation | np.array (1D)
+                The oberservation space of this environment will include [Wealth, Tau] as well as all of the paramters specified in State_Parameters
 
         Notes
         -----
-            1. Since this environment is based in historical data, reset must select at random a new starting Index
-               for the next episode.
+            Wealth is initalised as a uniform random variable about 1 as that is the range across which the utlity curve's gradient variaes the most, and a random starting wealth helps the agents to experiance many wealths, and hence better map the value function. When validating however wealth is always instanced at 1, for consistency.
+
+            Since this environment is based in historical data, reset must select at random a new starting Index for the next episode.
         '''
 
         if self.isTraining == True:
@@ -252,25 +284,39 @@ class HistoricalEnv(gym.Env):
 
 
     def step (self, Action):
+
         '''
+        Steps the environment forward, this is the main point of interface between an agent and the environment.
+
         Parameters
         ----------
-            Action : A 1D numpy array contianing the leverage to apply to the asset.
-                     Since both databases include only one asset this will be a 1D array of length 1
+            Action | np.array (1D)
+                The array must have the same length as the number of assets in the environment. The Nth value in the array represents the fraction of ones wealth to invest in the Nth asset. Negative values may be sent to enter short positions, or values with abs() > 1 to leverage oneself.
 
         Returns
         -------
-            A tuple of data of the following form:
-                0. State  - A 1D numpy array containing all the information required to characterise this period state
-                1. Reward - The reward for the last action
-                2. Done   - A boolean indicating whether the episode has ended
-                3. Info   - A dictionary of additional information (currenly empty.)
+            A tuple of the following 4 things:
+
+            1. Observation | np.array (1D)
+                The oberservation space of this environment will include [Wealth, Tau] as well as all of the paramters specified in State_Parameters.
+
+            2. Reward | float
+                The reward for the last action taken.
+
+            3. Done | bool
+                Indicates whether the current episode has ended or not. Once an episode has ended the envrionment must be reset before another step may be taken.
+
+            4. Info | dict
+                A dictionary which includes extra information about the state of the environment which is not included in the observation as it is not relevent to the agent. Currently this includes:
+                    'Mkt-Rf' : The excess return of the market on the last step
+                    'Rfree'  : The risk free rate.
         '''
 
+        assert hasattr(self, 'Done'), 'Environment must be reset before the episode starts'
         assert self.Done == False, "Attempt to take an action whilst Done == True"
         assert self.action_space.contains(Action), "Action %r is not within the action space" % (Action)
 
-        Return = (1 + self.Rf[self.Index] + self.Return_Data[self.Index] * Action[0])
+        Return = (1 + self.Rf[self.Index][0] + np.sum(self.Return_Data[self.Index] * Action))
 
         if self.Intermediate_Reward == True and self.Risk_Aversion == 1:
             self.Reward = self.Utility(self.Wealth * Return) - self.Utility()
@@ -296,7 +342,15 @@ class HistoricalEnv(gym.Env):
 
 
     def Gen_State (self):
-        ''' Genrates a state array '''
+        '''
+        Generates an observation (For internal use only)
+
+        Returns
+        -------
+            np.array (1D)
+                An observation
+        '''
+
         Tau = (self.End_Index - self.Index) / (1 / self.Time_Step)
         return np.append([self.Wealth, Tau], self.State_Data[self.Index])
 
@@ -320,19 +374,73 @@ class HistoricalEnv(gym.Env):
 
 
     def Utility (self, *args):
-        ''' Determine the utility of the investor at the end of life '''
+        '''
+        Calculates investor utility
+
+        Parameters
+        ----------
+            None
+                If no arguments are passed then the function returns the utility of the environments internal wealth.
+
+            float (Optional)
+                If a float is passed then the fucntion returns the utility using this value as wealth
+
+            np.array (Optional)
+                If a np array is passed then the function returns a np array of the same size, with each value replaced by the utility of the input value at the same index.
+
+        Returns
+        -------
+            The utility either as a float if no input is given, or as the same type as the argument.
+
+        Notes
+        -----
+            Since utility is undefined if wealth equals 0 or is negative, in this event a utility of -10 is returned.
+        '''
 
         if len(args) == 1:
             Wealth = args[0]
         else:
             Wealth = self.Wealth
 
-        if Wealth <= 0:
+        if np.any(Wealth <= 0):
             return -10
         elif self.Risk_Aversion == 1:
             return np.log(Wealth)
         else:
             return (Wealth ** (1 - self.Risk_Aversion)) / (1 - self.Risk_Aversion)
+
+
+    def Merton_Fraction (self):
+        '''
+        Calculates the merton portfolio fraction if there is only one asset, or the Markowitz portfolio and Merton portfolio fraction if multiple assets are being used.
+
+        Returns
+        -------
+            float
+                In the case of a single asset. Represents the Merton Portfolio Fraction
+
+            np.array (1D)
+                In the case of multiple assets. Represents the optimal fraction of ones wealth to invest in each asset.
+
+        '''
+
+        if self.Return_Data.shape[1] == 1:
+            return self.Training_Mean[0] / ((self.Training_Var[0]) * self.Risk_Aversion)
+
+        else:
+            Cov = np.cov(np.vstack((self.Return_Data[0:self.Validation_Start], self.Return_Data[self.Validation_End:])), rowvar = False)
+            Data = {'Mean'  : self.Training_Mean,
+                    'Var'   : self.Training_Var,
+                    'Cov'   : Cov}
+
+            cons = [{'type': 'ineq', 'fun': lambda x:  np.sum(x) - 1},
+                    {'type': 'ineq', 'fun': lambda x: -np.sum(x) + 1}]
+
+            Weights = np.array(minimize(Sharpe_Ratio, [1 / Data['Mean'].size] * Data['Mean'].size, args = (Data), constraints = cons).x).reshape(-1,1)
+            Var = np.matmul(np.matmul(Weights.T, Cov), Weights)[0,0]
+            Merton_Leverage = (np.sum(Weights * Data['Mean'])) / (self.Risk_Aversion * Var)
+
+            return Weights * Merton_Leverage
 
 
     def Validate (self, N_Episodes, Agent):
@@ -341,7 +449,11 @@ class HistoricalEnv(gym.Env):
 
         Parameters
         ----------
-            N_Episodes : The number of episodes to validate across.
+            N_Episodes | int
+                The number of episodes to validate across.
+
+            Agent | A compatible AC or DQN Agent.
+                The Agent to validate.
 
         Returns
         -------
@@ -365,16 +477,17 @@ class HistoricalEnv(gym.Env):
 
             while Done == False:
                 Action = Agent.Predict_Action(State.reshape(1, self.observation_space.shape[0]))
-                State, Reward, Done, Info = self.step(Action[0])
-                Returns.append(Info['Mkt-Rf'])
-                RF_Returns.append(Info['Rfree'])
+                State, Reward, Done, Info = self.step(Action.flatten())
+                Returns.append(list(Info['Mkt-Rf']))
+                RF_Returns.append(Info['Rfree'][0])
 
                 if Done:
                     Merton_Return = 1
                     RFree_Return  = 1
-                    for i in range(len(Returns)):
+                    Returns = np.array(Returns)
+                    for i in range(Returns.shape[0]):
                         RFree_Return  *= (1 + RF_Returns[i])
-                        Merton_Return *= (1 + RF_Returns[i] + Returns[i] * self.Training_Merton)
+                        Merton_Return *= (1 + RF_Returns[i] + np.sum(Returns[i] * self.Training_Merton))
 
                     Risk_Free_Rewards.append(self.Utility(RFree_Return))
                     Merton_Rewards.append(self.Utility(Merton_Return))
@@ -383,3 +496,43 @@ class HistoricalEnv(gym.Env):
 
         self.isTraining = True
         return Terminal_Rewards, Risk_Free_Rewards, Merton_Rewards
+
+
+
+def Sharpe_Ratio(Weights, Data):
+    '''
+    This function is used by the Merton_Fraction to calculate the Markowitz portfolio.
+
+    Parameters
+    ----------
+        Data | dict
+            A dictionary with the following keys:
+
+            'Mean' | np.array 1D
+                The mean excess returns of the asset(s)
+
+            'Var' | np.array 1D
+                The variance of return of the asset(s)
+
+            'Cov' | np.array 2D
+                The covaraince matrix of asset(s) return
+
+    Returns
+    -------
+        float
+            The negative absolute sharpe ratio.
+
+    Notes
+    -----
+        Scipy.optimise.minimise is used for the optimiser routine, hence the negative sharpe must be returned.
+        The abs sharpe is used, as we can just short the portfolio with the highest abs sharpe if it happens to be negative. This ensures the sim works with assets with both positive and negative mean returns.
+    '''
+
+    Weights = np.array(Weights).reshape(-1,1)
+    Excess_ret = np.sum(Weights * Data['Mean'])
+
+    Var = np.matmul(np.matmul(Weights.T, Data['Cov']), Weights)
+
+    Sharpe = Excess_ret / (Var ** 0.5)[0,0]
+
+    return -np.abs(Sharpe)

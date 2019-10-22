@@ -18,22 +18,30 @@ class DQN_Template:
         '''
         Parameters
         ----------
-            Environment       : The gym environment that the agent should train within.
-            Action_Discretise : The discretisation of the action_space.
-            Network_Params    : A dictionary or parameters used to Initialise the neural network used to approximate the quality function
-                                which includes:
-                                   Network Size  : A list of N ints where each entry represents the desired number of nodes in the Nth hidden layer
-                                   Learning Rate : The learning rate used to update the weights and biases of the network
-                                   Activation    : The activation function used. Acceptable inputs include ("Sigmoid", "Relu")
-                                   Epoch         : The number of back propergation passes to be ran each time Fit is called.
-                                   Alpha         : An L2 regularization term.
-            Gamma             : The rate used to discount future reward when appraising the value of a state.
-            Epsilon_Range     : The range of epsilon (for an epsilon greedy policy) across a training sequence
-            Epsilon_Anneal    : The fraction of the training sequence which should have passed for epsilon to fall from its starting
-                                value to its terminal value.
-            Retrain_Frequency : The frequency at which the internal network is refitted (Measured in episode.)
+            Environment | OpenAI Gym enviornment
+                The environment to train the DQN within, ususally one of the Portfolio_Gym environments
+
+            Gamma | float
+                The rate used to discount future reward when appraising the value of a state.
+
+            Epsilon_Range | list
+                The range of epsilon (for an epsilon greedy policy) across a training sequence.
+
+            Epsilon_Anneal | float
+                The fraction of the training sequence which should have passed for epsilon to fall from its starting value to its terminal value.
+
+            Model | N/A
+                The neural network used by the agent. Can be numpy, tensorflow or scikit based.
+
+            Action_Discretise | int
+                The discretisation of the action_space.
+
+            Retrain_Frequency | int
+                The number of episodes between refits of the Network
+
 
         '''
+
         self.Environment       = Environment
         self.Gamma             = Gamma
         self.Epsilon_Range     = Epsilon_Range
@@ -46,19 +54,21 @@ class DQN_Template:
         self.State_Dim         = Environment.observation_space.shape[0]
         self.Pool_Size         = 1e6
 
-    def Train (self, N_Episodes,  Plot = Empty):
+    def Train (self, N_Episodes,  Plot = Empty, Diag = Empty):
         '''
         Trains the agent
 
         Parameters
         ----------
-            N_Episodes : The number of episodes to train the DQN Agent across.
+            N_Episodes | int
+            The number of episodes the agent should be trained for. Note parameters like sigma and learning rate decay scale with the number of episodes.
 
-        Notes
-        -----
-            Since the DQN learns off policy there should be no negative effects of calling Train() multiple times in series on
-            the same agent. However perfered behaviour is to call this function only once as it ensures the agent slowly acts more
-            optimally across the training sequence. (Epsilon will jump back to its inital value in subsequent calls to this function).
+            Plot | func
+                A function pointer used by the Wrapper to plot the performance of the agent as it learns. This function is called every 10k steps.
+
+            Diag | func
+                A function pointer used by the wrapper to plot diagnostics (for example the sensitivity of Actor/Critic to state parameters). This function is called only 5 times throughout training.
+
         '''
 
         epsilons = self.Epsilon_Range[0] * np.ones(N_Episodes) - (1 / self.Epsilon_Anneal) * np.arange(0, N_Episodes) * (self.Epsilon_Range[0] - self.Epsilon_Range[1])
@@ -90,9 +100,13 @@ class DQN_Template:
             if i % self.Retrain_Frequency == 0:
                 self.Refit()
                 Plot(Episode_Exps)
+                Episode_Exps = []
 
     def Refit(self):
-        ''' Refit the internal network. Accepts no arguments, since it uses the data stored in self.Exp '''
+        '''
+        Refit the internal network.
+        Accepts no arguments, since it uses the data stored in self.Exp
+        '''
         pass
 
     def Predict_Q(self, state):

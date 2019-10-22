@@ -1,22 +1,44 @@
-import numpy             as np
-import matplotlib.pyplot as plt
+import numpy as np
 import tqdm
 import warnings
-
-# Pull from the git if it breaks, last pushed morning 14th Oct
-
 
 def Empty (*args):
     ''' An empty function which accepts any number of arguments '''
     pass
 
-# Version IV
-#   1. Updated the neural networks to use SGD - Doesnt work tho
 
 # A Neural Network, with squared loss.
 class Critic_NeuralNet:
 
     def __init__ (self, Shape, Input_Dim, Output_Dim, Learning_Rate = 0.01, Epoch = 1, Activation = "Relu", Alpha = 0.005):
+
+        '''
+        The Critic neural network uses a standard SSE loss function
+
+        Parameters
+        ----------
+            Shape | list
+                The number of nodes to put in each hidden layer.
+
+            Input_Dim | int
+                The number of variables in a single observation of the input.
+
+            Output_Dim | int
+                The number of variables in a single obervation of the output.
+
+            Learning_Rate | float, list
+                The network learning rate if passed as a float. If a list is passed it must contain 2 floats followed by an int, in the following configuration [Min_Learning_Rate, Max_Learning_Rate, Cycle_Length]. The network will then utilise cyclical learning rates, cycling between the two bounds.
+
+            Epoch | int
+                The number of times the data should be passed through the network per call to .Fit. Using a low learning rate with higher Epoch may smooth performance.
+
+            Activation | one of ['Relu', 'Sigmoid']
+                The activation function.
+
+            Alpha | float
+                L2 regularization coefficient. Set to zero to disable.
+
+        '''
 
         if isinstance(Learning_Rate, list):
             assert len(Learning_Rate) == 3, 'Learning_Rate must be a float or a list of lenght 3'
@@ -39,9 +61,6 @@ class Critic_NeuralNet:
         elif Activation == "Sigmoid":
             self.Act   = self.Sigmoid
             self.d_Act = self.d_Sigmoid
-        elif Activation == "Identity":
-            self.Act   = self.Identity
-            self.d_Act = self.d_Identity
 
         self.Shape = [Input_Dim] + Shape + [Output_Dim]
         for i in range(1, len(self.Shape)):
@@ -52,27 +71,27 @@ class Critic_NeuralNet:
         self.Zs      = [None] * (len(self.Weights) + 1)   #Post Sigmoid
 
     def Sigmoid (self, X):
+        ''' The sigmoid activation function. Accepts float or np.array '''
         return 1.0 / (1.0 + np.exp(-X))
 
     def d_Sigmoid (self, X):
+        ''' The derivative of the sigmoid activation function. Accepts float or np.array '''
         return self.Sigmoid(X) * (1 - self.Sigmoid(X))
 
     def Relu (self, X):
+        ''' The Relu activation function. Accepts float or np.array '''
         return X * (X > 0)
 
     def d_Relu (self, X):
+        ''' The derivative of the Relu activation function. Accepts float or np.array '''
         return (X > 0)
 
-    def Identity (self, X):
-        return X
-
-    def d_Identity (self, X):
-        return np.ones(X.shape)
-
     def d_Loss (self, Y_hat, Y):
+        ''' The derivative of the SSE loss function. '''
         return 2 * (Y_hat - Y)
 
     def Forward_Pass (self, X):
+        ''' Conduct a forward pass through the network, and store the result in self.Zs (Network activations.) '''
         self.As = [None] * (len(self.Weights) + 1)
         self.Zs = [None] * (len(self.Weights) + 1)
         self.As[0] = X
@@ -90,6 +109,7 @@ class Critic_NeuralNet:
                 self.Zs[i] = self.Act(self.As[i])
 
     def BackProp (self, X, Y):
+        ''' Backpropergation, using the activations stored in self.Zs '''
         Grads = []
         for i in range(len(self.Weights))[::-1]:
             A      = self.As[i+1]
@@ -117,10 +137,37 @@ class Critic_NeuralNet:
                 self.Biases[i]  -= self.Learning_Rate * Grads[i]["Bias"]
 
     def Predict (self, X):
+        '''
+        User facing function to extract a prediction from the network.
+
+        Parameters
+        ----------
+        X | np.array (2D)
+            A 2D array with obervations in the rows (i.e. each row contains a new observation)
+
+        Returns
+        -------
+            np.array (2D)
+                An array with the network predictions for each observation in X.
+        '''
+
         self.Forward_Pass(X)
         return self.Zs[-1]
 
     def Fit (self, X, Y):
+        '''
+        User facing function to fit the network.
+
+        Parameters
+        ----------
+        X | np.array (2D)
+            A 2D array with obervations in the rows (i.e. each row contains a new observation)
+
+        Y | np.array (2D)
+            A 2D array with outcomes in the rows
+
+        '''
+
         for _ in range(self.Epoch):
 
             if hasattr(self, 'Learning_Rate_Index'):
@@ -134,7 +181,36 @@ class Critic_NeuralNet:
 
 # A Neural Network, with custom loss function for Mu only policy gradient
 class Policy_NeuralNet:
+
     def __init__ (self, Shape, Input_Dim, Output_Dim, Learning_Rate = 0.01, Epoch = 1, Activation = "Relu", Alpha = 0.0001):
+
+        '''
+        The Critic neural network uses a standard SSE loss function
+
+        Parameters
+        ----------
+            Shape | list
+                The number of nodes to put in each hidden layer.
+
+            Input_Dim | int
+                The number of variables in a single observation of the input.
+
+            Output_Dim | int
+                The number of variables in a single obervation of the output.
+
+            Learning_Rate | float, list
+                The network learning rate if passed as a float. If a list is passed it must contain 2 floats followed by an int, in the following configuration [Min_Learning_Rate, Max_Learning_Rate, Cycle_Length]. The network will then utilise cyclical learning rates, cycling between the two bounds.
+
+            Epoch | int
+                The number of times the data should be passed through the network per call to .Fit. Using a low learning rate with higher Epoch may smooth performance.
+
+            Activation | one of ['Relu', 'Sigmoid']
+                The activation function.
+
+            Alpha | float
+                L2 regularization coefficient. Set to zero to disable.
+
+        '''
 
         if isinstance(Learning_Rate, list):
             assert len(Learning_Rate) == 3, 'Learning_Rate must be a float or a list of lenght 3'
@@ -158,9 +234,6 @@ class Policy_NeuralNet:
         elif Activation == "Sigmoid":
             self.Act   = self.Sigmoid
             self.d_Act = self.d_Sigmoid
-        elif Activation == "Identity":
-            self.Act   = self.Identity
-            self.d_Act = self.d_Identity
 
         self.Shape = [Input_Dim] + Shape + [Output_Dim]
         for i in range(1, len(self.Shape)):
@@ -170,28 +243,28 @@ class Policy_NeuralNet:
         self.As      = [None] * (len(self.Weights) + 1)   #Pre Sigmoid
         self.Zs      = [None] * (len(self.Weights) + 1)   #Post Sigmoid
 
-    def Sigmoid(self, X):
+    def Sigmoid (self, X):
+        ''' The sigmoid activation function. Accepts float or np.array '''
         return 1.0 / (1.0 + np.exp(-X))
 
-    def d_Sigmoid(self, X):
+    def d_Sigmoid (self, X):
+        ''' The derivative of the sigmoid activation function. Accepts float or np.array '''
         return self.Sigmoid(X) * (1 - self.Sigmoid(X))
 
-    def Relu(self, X):
+    def Relu (self, X):
+        ''' The Relu activation function. Accepts float or np.array '''
         return X * (X > 0)
 
-    def d_Relu(self, X):
+    def d_Relu (self, X):
+        ''' The derivative of the Relu activation function. Accepts float or np.array '''
         return (X > 0)
 
-    def Identity (self, X):
-        return X
-
-    def d_Identity (self, X):
-        return np.ones(X.shape)
-
     def d_Loss(self, Action, Mu, Reward, Sigma):
+        ''' The derivative of the log likelihood of picking Action from a normal distribution of N(Mu, Sigma), multiplied by Advantage '''
         return -((Action - Mu) / (Sigma ** 2)) * Reward
 
     def Forward_Pass(self, X):
+        ''' Conduct a forward pass through the network, and store the result in self.Zs (Network activations.) '''
         self.As = [None] * (len(self.Weights) + 1)
         self.Zs = [None] * (len(self.Weights) + 1)
         self.As[0] = X
@@ -209,6 +282,7 @@ class Policy_NeuralNet:
                 self.Zs[i] = self.Act(self.As[i])
 
     def BackProp(self, State, Action, Reward, Sigma):
+        ''' Backpropergation, using the activations stored in self.Zs '''
         Grads = []
         for i in range(len(self.Weights))[::-1]:
             A      = self.As[i+1]
@@ -236,10 +310,46 @@ class Policy_NeuralNet:
                 self.Biases[i]  -= self.Learning_Rate * self.LR_Mult * Grads[i]["Bias"]
 
     def Predict(self, State):
+        '''
+        User facing function to extract a prediction from the network.
+
+        Parameters
+        ----------
+        State | np.array (2D)
+            A 2D array with obervations in the rows (i.e. each row contains a new observation)
+
+        Returns
+        -------
+            np.array (2D)
+                An array with the network predictions for each observation in State.
+        '''
+
         self.Forward_Pass(State)
         return self.Zs[-1]
 
     def Fit(self, State, Action, Reward, Sigma, LR_Mult = 1):
+        '''
+        User facing function to fit the network.
+
+        Parameters
+        ----------
+        State | np.array (2D)
+            A 2D array with State_0 in the rows (i.e. each row contains a new observation)
+
+        Action | np.array (2D)
+            A 2D array with Actions in the rows (i.e. each row contains a new observation)
+
+        Reward | np.array (2D)
+            A 2D array with Rewards in the rows (i.e. each row contains a new observation)
+
+        Sigma | float
+            The Sigma of the policy. This is not decided by the network in this version, but instead is slowly decayed across the learning episodes.
+
+        LR_Mult | float
+            In order to counter the loss function exploding with decreasing sigma the Learning_Rate may be decayed using this parameter.
+
+        '''
+
         self.LR_Mult = LR_Mult
 
         if hasattr(self, 'Learning_Rate_Index'):
@@ -255,7 +365,45 @@ class Policy_NeuralNet:
 
 class Actor_Critic:
 
-    def __init__ (self, Environment, Actor_Params, Critic_Params, Gamma, Sigma_Range, Sigma_Anneal, Retrain_Frequency, MiniBatch_Size = 0):
+    def __init__ (self, Environment, Actor_Hypers, Critic_Hypers, Gamma, Sigma_Range, Sigma_Anneal, Retrain_Frequency, MiniBatch_Size = 0):
+
+        '''
+        Parameters
+        ----------
+            Environment | OpenAI Gym enviornment
+                The environment to train the AC within, ususally one of the Portfolio_Gym environments
+
+            Gamma | float
+                The discount rate for reward recieved by the agent.
+
+            Sigma_Range | list
+                A list of two floats, the first gives the starting sigma, and the last giving the terminal sigma. Sigma here referes to the sigma of the policy.
+
+            Sigma_Anneal | float
+                The fraction of training episodes which must pass before sigma decays to its terminal value.
+
+            Retrain_Frequency | int
+                The number of episodes between refits of the Actor and Critic
+
+            MiniBatch_Size | int
+                The size of the batch of data the networks are fitted on. Set to zero to disable minibatching. (it is reccomended to set this parameter to zero and simply refit more frequently.)
+
+
+            Actor_Hypers | dict
+                'Network Size'  | int         | The size of the Actor NN
+                'Learning Rate' | float, list | The learning rate of the Actor. list for cyclical learning rate, see network annotation.
+                'Activation'    | string      | The activation of the Actor. Acceptable inputs include ['Relu', 'Sigmoid']
+                'Epoch'         | int         | The Actor Epoch
+                'Alpha'         | float       | L2 regularization coefficient for the Actor.
+
+            Critic_Hypers | dict
+                'Network Size'  | int         | The size of the Critic NN
+                'Learning Rate' | float, list | The learning rate of the Critic. list for cyclical learning rate, see network annotation.
+                'Activation'    | string      | The activation of the Critic. Acceptable inputs include ['Relu', 'Sigmoid']
+                'Epoch'         | int         | The Critic Epoch
+                'Alpha'         | float       | L2 regularization coefficient for the Critic.
+
+        '''
 
         self.Retrain_Frequency = Retrain_Frequency
         self.Sigma_Range       = Sigma_Range
@@ -265,8 +413,8 @@ class Actor_Critic:
         self.Action_Dim        = Environment.action_space.shape[0]
         self.MiniBatch_Size    = MiniBatch_Size
 
-        self.Actor_Hypers  = Actor_Params
-        self.Critic_Hypers = Critic_Params
+        self.Actor_Hypers  = Actor_Hypers
+        self.Critic_Hypers = Critic_Hypers
 
         self.Actor  = Policy_NeuralNet(self.Actor_Hypers["Network Size"], self.State_Dim, self.Action_Dim,
                                        Learning_Rate = self.Actor_Hypers["Learning Rate"],
@@ -283,18 +431,22 @@ class Actor_Critic:
         self.Environment = Environment
 
 
-    def Train (self, N_Episodes, Plot = Empty):
+    def Train (self, N_Episodes, Plot = Empty, Diag = Empty):
 
         '''
         Train the AC agent in its specified environment.
 
         Parameters
         ----------
-            N_Episodes : The number of episodes the agent should be trained for. Note parameters like
-                         sigma and learning rate decay scale with the number of episodes.
+            N_Episodes | int
+            The number of episodes the agent should be trained for. Note parameters like sigma and learning rate decay scale with the number of episodes.
 
-            Plot       : A list of plots which the function should return.
-                         Accepted inputs include:
+            Plot | func
+                A function pointer used by the Wrapper to plot the performance of the agent as it learns. This function is called every 10k steps.
+
+            Diag | func
+                A function pointer used by the wrapper to plot diagnostics (for example the sensitivity of Actor/Critic to state parameters). This function is called only 5 times throughout training.
+
         '''
 
         Exp = []
@@ -317,6 +469,10 @@ class Actor_Critic:
                 State_0 = State_1
                 Step_Count += 1
 
+
+            for j in range(len(Episode_Exp) - 1)[::-1]:
+                Episode_Exp[j]["r"] += Episode_Exp[j+1]["r"] * self.Gamma
+
             Exp.extend(Episode_Exp)
             Episode_Exps.append(Episode_Exp)
 
@@ -325,19 +481,18 @@ class Actor_Critic:
                 Episode_Exps = []
                 Step_Count = 0
 
-            if i % self.Retrain_Frequency == 0:
-                State_0 = np.array([e['s0'] for e in Exp]).reshape((-1, self.State_Dim))
-                State_1 = np.array([e['s1'] for e in Exp]).reshape((-1, self.State_Dim))
-                Action  = np.array([e['a']  for e in Exp]).reshape((-1, self.Action_Dim))
-                Reward  = np.array([e['r']  for e in Exp]).reshape((-1, 1))
-                Done    = np.array([e['d']  for e in Exp]).reshape((-1, 1)).astype(int)
-                Value   = Reward + self.Gamma * Done * self.Critic.Predict(State_1)
+            if i % int(N_Episodes / 5) == 0:
+                Diag()
 
-                Advantage = Value - self.Critic.Predict(State_0)
+            if i % self.Retrain_Frequency == 0:
+                State_0   = np.array([e['s0'] for e in Exp]).reshape((-1, self.State_Dim))
+                Action    = np.array([e['a']  for e in Exp]).reshape((-1, self.Action_Dim))
+                Reward    = np.array([e['r']  for e in Exp]).reshape((-1, 1))
+                Advantage = Reward - self.Critic.Predict(State_0)
 
                 if self.MiniBatch_Size == 0:
                     self.Actor.Fit(State_0, Action, Advantage, Sigma, LR_Mult = Sigma)
-                    self.Critic.Fit(State_0, Value)
+                    self.Critic.Fit(State_0, Reward)
 
                 else:
                     idx = np.random.choice(State_0.shape[0], size = (State_0.shape[0] // self.MiniBatch_Size, self.MiniBatch_Size), replace = False)
@@ -349,9 +504,32 @@ class Actor_Critic:
 
 
     def Predict_Action (self, X):
-        ''' Returns the optimal action given a state '''
+        '''
+        Parameters
+        ----------
+            X | np.array
+                A np array of states or a single state for which the action will be predicted.
+
+        Returns
+        -------
+            np.array (2D)
+                An array of actions (each action on its own row.)
+        '''
+
         return self.Actor.Predict(X.reshape(-1, self.State_Dim))
 
 
     def Predict_Value (self, X):
+        '''
+        Parameters
+        ----------
+            X | np.array
+                A np array of states or a single state for which the value will be predicted.
+
+        Returns
+        -------
+            np.array (2D)
+                An column vector of values.
+        '''
+
         return self.Critic.Predict(X.reshape(-1,self.State_Dim))
