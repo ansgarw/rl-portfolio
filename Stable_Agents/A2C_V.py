@@ -65,6 +65,7 @@ class Critic_NeuralNet:
         self.Shape = [Input_Dim] + Shape + [Output_Dim]
         for i in range(1, len(self.Shape)):
             self.Weights.append(np.random.normal(0, 1, (self.Shape[i-1], self.Shape[i])) * ((2 / (self.Shape[i-1] + self.Shape[i])) ** 0.5))
+            # self.Weights.append(np.random.normal(0, 1, (self.Shape[i-1], self.Shape[i])) * ((2 / (self.Shape[i-1] + self.Shape[i]))))
             self.Biases.append(np.random.normal(0, 1, (self.Shape[i], 1)))
 
         self.As      = [None] * (len(self.Weights) + 1)   #Pre Sigmoid
@@ -238,6 +239,7 @@ class Policy_NeuralNet:
         self.Shape = [Input_Dim] + Shape + [Output_Dim]
         for i in range(1, len(self.Shape)):
             self.Weights.append(np.random.normal(0, 1, (self.Shape[i-1], self.Shape[i])) * ((2 / (self.Shape[i-1] + self.Shape[i])) ** 0.5))
+            # self.Weights.append(np.random.normal(0, 1, (self.Shape[i-1], self.Shape[i])) * ((2 / (self.Shape[i-1] + self.Shape[i]))))
             self.Biases.append(np.random.normal(0, 1, (self.Shape[i], 1)))
 
         self.As      = [None] * (len(self.Weights) + 1)   #Pre Sigmoid
@@ -365,7 +367,7 @@ class Policy_NeuralNet:
 
 class Actor_Critic:
 
-    def __init__ (self, Environment, Actor_Hypers, Critic_Hypers, Gamma, Sigma_Range, Sigma_Anneal, Retrain_Frequency, MiniBatch_Size = 0):
+    def __init__ (self, Environment, Actor_Hypers, Critic_Hypers, Gamma, Sigma_Range, Sigma_Anneal, Retrain_Frequency, MiniBatch_Size = 0, Action_Space_Clip = 10):
 
         '''
         Parameters
@@ -387,6 +389,9 @@ class Actor_Critic:
 
             MiniBatch_Size | int
                 The size of the batch of data the networks are fitted on. Set to zero to disable minibatching. (it is reccomended to set this parameter to zero and simply refit more frequently.)
+
+            Action_Space_Clip | float
+                The value at which to clip the levergae the agent can take, to prevent it from randomly acting too agressively.
 
 
             Actor_Hypers | dict
@@ -412,6 +417,7 @@ class Actor_Critic:
         self.State_Dim         = Environment.observation_space.shape[0]
         self.Action_Dim        = Environment.action_space.shape[0]
         self.MiniBatch_Size    = MiniBatch_Size
+        self.Action_Space_Clip = Action_Space_Clip
 
         self.Actor_Hypers  = Actor_Hypers
         self.Critic_Hypers = Critic_Hypers
@@ -461,7 +467,7 @@ class Actor_Critic:
             Sigma = max(self.Sigma_Range[0] - ((self.Sigma_Range[0] - self.Sigma_Range[1]) * (i / (self.Sigma_Anneal * N_Episodes))), self.Sigma_Range[1])
 
             while Done == False:
-                Mu = np.clip(self.Actor.Predict(State_0.reshape(1, self.State_Dim)), -10, 10)
+                Mu = np.clip(self.Actor.Predict(State_0.reshape(1, self.State_Dim)), -self.Action_Space_Clip, self.Action_Space_Clip)
                 Leverage = np.random.normal(Mu, Sigma)
 
                 State_1, Reward, Done, Info = self.Environment.step(Leverage[0])
@@ -516,7 +522,7 @@ class Actor_Critic:
                 An array of actions (each action on its own row.)
         '''
 
-        return self.Actor.Predict(X.reshape(-1, self.State_Dim))
+        return np.clip(self.Actor.Predict(X.reshape(1, self.State_Dim)), -self.Action_Space_Clip, self.Action_Space_Clip)
 
 
     def Predict_Value (self, X):

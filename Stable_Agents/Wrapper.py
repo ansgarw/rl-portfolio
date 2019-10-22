@@ -26,7 +26,7 @@ class Wrapper:
 
     def Train (self, N_Episodes, Plot = [], Diagnostics = []):
         '''
-        Train the agent inside the wrapper so plots may be generated.
+        Train the agent inside the wrapper so plots may be generated. This is the only function the user needs to call.
 
         Parameters
         ----------
@@ -35,11 +35,20 @@ class Wrapper:
 
             Plots | list
                 A list containing keywords for the plots to generate. Acceptable inputs include:
-                    1. 'Mu' : This will return a plot of the true (pre sigma/epsilon) predictions made by the agent. It will have lenght equivalent to the total number of steps in the training episodes, and will have the same dimensions as the actionspace.
+                    1. 'Mu' : This will return a plot of the true (pre sigma/epsilon) predictions made by the agent.
 
                     2. Merton_Benchmark : Plot the average utility of both the Merton Portfolio and the DQN across 100 episodes (from the training dataset) acting greedily
 
                     3. Percent_Merton_Action : Returns the fraction of actions recomended by the actor which are within 10% of the merton portfolio action.
+
+            Diagnostics | List (of dict)
+                A list contianing dictionaries identifying the required disgnostic plots. Currently only 2D plots of the sensativity of either the Actor or Critic vs one state parameter may be generated. The dictionaries must include two keys:
+                    1. 'Module' | string
+                        Either 'Actor' or 'Critic'
+                    2. 'Factor' | int
+                        The index of the state parameter whose sensitivity is desired.
+
+                Currently no diagnostics for the DQN are implemented.
 
         '''
 
@@ -66,6 +75,15 @@ class Wrapper:
 
 
     def Plotting_Function (self, Episode_Exps):
+
+        '''
+        The plotting function which is passed to an Agents train function to record its performance whilst training. Not user facing.
+
+        Parameters
+        ----------
+            Episode_Exps | list
+                A list of lists of experiance dictionaries. Each list of expeiance dictionaries should include all of the experiance from a single episode, in the correct order.
+        '''
 
         if 'Merton_Benchmark' in self.Plot_Data.keys():
             results = {'Agent'  : [],
@@ -103,7 +121,9 @@ class Wrapper:
 
 
     def Display (self):
-        ''' Display the data '''
+        '''
+        Construct and display the requested plots. Not user facing.
+        '''
 
         if len(self.Plot_Data.keys()) == 0 : return None
         f, ax = plt.subplots(1 , len(self.Plot_Data.keys()), figsize = (6 * len(self.Plot_Data.keys()), 6))
@@ -165,6 +185,17 @@ class Wrapper:
 
 
     def Run_Diagnostics (self):
+
+        '''
+        The plotting function which is passed to an agents train function to facilitate the construction of diagnostics plots. The performance evalaution plots are called much more frequently, hence these plots needed to be segregated.
+
+        Currently supports the construction of 2D plots of the sensitivity of the Actor or Critic to one of the state parameters, holding all others constant at one.
+
+        Notes
+        -----
+            It does not make sense to use this with environments with many factors, as each factor will have its own range which might not include one, hence the plots will no longer be a true depiction of the sensitivity of the networks. Further work into depicting network sensitivities required.
+            That said these functions were instrumental to understanding the AC performance in the simple simulation.
+        '''
 
         for i, Diag in enumerate(self.Diagnostics):
             State = np.zeros((25, self.Agent.State_Dim))
