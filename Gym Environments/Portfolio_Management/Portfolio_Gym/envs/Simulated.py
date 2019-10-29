@@ -450,12 +450,6 @@ class VAR_Engine:
         self.Asset_AR_len  = int((self.Asset_Beta.shape[0] - 1) / self.Num_Factors)
         self.Factor_AR_len = self.Factor_Beta.shape[0] - 1
 
-        if os.path.exists(FilePath + "Sim_Cache.pkl"):
-            with open(FilePath + 'Sim_Cache.pkl', 'rb') as file:
-                 self.Preset_Cache = pickle.load(file)
-        else:
-            self.Preset_Cache = {}
-
         assert self.Asset_Beta.shape[0] == 1 + self.Asset_AR_len * self.Num_Factors, 'Ensure that the asset corrolates to each factor for the same number of periods'
         assert self.Cov.shape[0] == self.Num_Assets + self.Num_Factors, 'Cov dimensions do not match the number of assets and factors'
 
