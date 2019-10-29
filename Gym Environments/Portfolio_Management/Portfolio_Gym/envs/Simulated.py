@@ -2,10 +2,14 @@ import numpy as np
 import warnings
 import gym
 from scipy.optimize import minimize
+import os
+import pickle
 
-
-
-
+'''
+Required changes;
+    1. Generate a cache of returns when the envrionment is instanced, and then just run through them.
+    2. Generate these returns on a JIT basis, to minimise the likelihood of having to generate twice.
+'''
 
 class SimulatedEnv(gym.Env):
 
@@ -407,6 +411,13 @@ class VAR_Engine:
             'Period'      : 0.25
 
 
+        Single asset single factor with high R2 (Should allow more dramatic outperformance of the RL Agents)
+            'Factor_Beta' : np.array([-0.1694, 0.9514]).reshape(-1,1)
+            'Asset_Beta'  : np.array([0.5549, 0.1568]).reshape(-1,1)
+            'Cov'         : np.array([[6.225, -6.044], [-6.044, 6.316]]) * 1e-3
+            'Period'      : 0.25
+
+
 
     '''
 
@@ -438,6 +449,12 @@ class VAR_Engine:
         self.Num_Factors   = self.Factor_Beta.shape[1]
         self.Asset_AR_len  = int((self.Asset_Beta.shape[0] - 1) / self.Num_Factors)
         self.Factor_AR_len = self.Factor_Beta.shape[0] - 1
+
+        if os.path.exists(FilePath + "Sim_Cache.pkl"):
+            with open(FilePath + 'Sim_Cache.pkl', 'rb') as file:
+                 self.Preset_Cache = pickle.load(file)
+        else:
+            self.Preset_Cache = {}
 
         assert self.Asset_Beta.shape[0] == 1 + self.Asset_AR_len * self.Num_Factors, 'Ensure that the asset corrolates to each factor for the same number of periods'
         assert self.Cov.shape[0] == self.Num_Assets + self.Num_Factors, 'Cov dimensions do not match the number of assets and factors'
@@ -480,30 +497,44 @@ class VAR_Engine:
         return np.exp(New_Returns) - 1
 
 
-    def Moments (self):
+    def Genrate_Returns (self, N, State_Hist_Len = 1):
         '''
+
+        Parameters
+        ----------
+            N | int
+                The number of periods of returns to generate.
+
+            State_Hist_Len | int
+                The number of periods of factors to include in the state.
+
         Returns
         -------
             A tuple containing the following data:
 
-            1. Asset(s) Mean excess returns | np.array (1D)
-                The array has length Num_Assets, and ith element gives the mean excess return of the ith asset
+            1. np.array (2D)
+                Asset returns for N consecutive periods
 
-            2. Asset(s) return standard deviation | np.array (1D)
-                The array has length Num_Assets, and ith element gives the return std of the ith asset
+            2. np.array (2D)
+                The values of the factors for N consecutive periods
 
-            3. Asset(s) Covariance | np.array (2D)
-                The covariance matrix of asset(s) returns.
+        Notes
+        -----
+            Due to the possible complexity of this model, it is necessary to calculate the moments of the asset(s) numerically.
+
         '''
 
-        # Use monte carlo simulation, as the variance of each asset becomes convoluted as the model size grows.
         self.reset()
-        Returns = []
-        for _ in range(100000):
-            Returns.append(list(self.step()))
+        Returns = np.zeros((N, self.Num_Assets))
+        Factors = np.zeros((N, self.Num_Factors * State_Hist_Len))
+
+        for i in range(200000):
+            Returns[i] = self.step().flatten()
+            Factors[i] = self.Factor_Values[-State_Hist_Len:][::-1].flatten()
 
         self.reset()
-        return np.mean(np.array(Returns), axis = 0), np.std(np.array(Returns), axis = 0), np.cov(np.array(Returns), rowvar = False)
+
+        return Returns, Factors
 
 
 
@@ -526,18 +557,13 @@ class Simulated_VAR_Env(gym.Env):
         self.Episode_Length      = kwargs['Episode_Length']
         self.Intermediate_Reward = kwargs['Intermediate_Reward']
         self.Factor_State_Len    = kwargs['Factor_State_Len']
+        self.Num_Returns         = 200000
 
         self.Wealth = np.clip(np.random.normal(1, 0.25), 0.25, 1.75)
         self.Tau    = self.Episode_Length * self.VAR_Model.Period
 
         self.Done   = False
         self.Reward = 0
-
-        # Placeholder Parameters - Required by Wrapper
-        self.Training_Mean, self.Training_Var, self.Training_Cov = self.VAR_Model.Moments()
-        self.Training_Var = self.Training_Var ** 2
-        self.Training_Merton = self.Merton_Fraction()
-        self.Mkt_Return      = None
 
         self.observation_space = gym.spaces.Box(low = np.array([0.0, 0.0] + [-100] * self.Factor_State_Len * self.VAR_Model.Num_Factors), high = np.array([self.Tau, 100] + [100] * self.Factor_State_Len * self.VAR_Model.Num_Factors), dtype = np.float32)
         self.action_space      = gym.spaces.Box(low = np.array([self.Min_Leverage] * self.VAR_Model.Num_Assets), high = np.array([self.Max_Leverage] * self.VAR_Model.Num_Assets), dtype = np.float32)
@@ -582,6 +608,9 @@ class Simulated_VAR_Env(gym.Env):
             Factor_State_Len | int
                 The number of periods of historical factor values to include in the state.
 
+            Num_Returns | int
+                The lenght of the return database from which experiance is sampled, in steps.
+
 
         Notes
         -----
@@ -592,10 +621,6 @@ class Simulated_VAR_Env(gym.Env):
         if set(['Factor_Beta', 'Asset_Beta', 'Cov', 'Period']).issubset(set(kwargs.keys())):
             self.VAR_Model = VAR_Engine(kwargs['Factor_Beta'], kwargs['Asset_Beta'], kwargs['Cov'], kwargs['Period'])
 
-            # Placeholder Parameters - Required by Wrapper
-            self.Training_Mean, self.Training_Var, self.Training_Cov = self.VAR_Model.Moments()
-            self.Training_Var = self.Training_Var ** 2
-
 
         self.Risk_Aversion       = kwargs['Risk_Aversion']       if 'Risk_Aversion'       in kwargs.keys() else self.Risk_Aversion
         self.Rf                  = kwargs['Rf']                  if 'Rf'                  in kwargs.keys() else self.Rf
@@ -604,16 +629,26 @@ class Simulated_VAR_Env(gym.Env):
         self.Episode_Length      = kwargs['Episode_Length']      if 'Episode_Length'      in kwargs.keys() else self.Episode_Length
         self.Intermediate_Reward = kwargs['Intermediate_Reward'] if 'Intermediate_Reward' in kwargs.keys() else self.Intermediate_Reward
         self.Factor_State_Len    = kwargs['Factor_State_Len']    if 'Factor_State_Len'    in kwargs.keys() else self.Factor_State_Len
+        self.Num_Returns         = kwargs['Num_Returns']         if 'Num_Returns'         in kwargs.keys() else self.Num_Returns
 
-
-        self.Training_Merton = self.Merton_Fraction()
-        self.Mkt_Return      = None
 
         self.observation_space = gym.spaces.Box(low = np.array([0.0, 0.0] + [-100] * self.Factor_State_Len * self.VAR_Model.Num_Factors), high = np.array([self.VAR_Model.Period * self.Episode_Length, 100] + [100] * self.Factor_State_Len * self.VAR_Model.Num_Factors), dtype = np.float32)
         self.action_space      = gym.spaces.Box(low = np.array([self.Min_Leverage] * self.VAR_Model.Num_Assets), high = np.array([self.Max_Leverage] * self.VAR_Model.Num_Assets), dtype = np.float32)
 
         if self.Intermediate_Reward == True and self.Risk_Aversion != 1:
             warnings.warn('Risk_Aversion is not one, Intermediate_Reward is disabled.')
+
+        self.Genrate_Returns()
+
+
+    def Genrate_Returns (self):
+
+        self.Returns, self.Factors = self.VAR_Model.Genrate_Returns(self.Num_Returns, self.Factor_State_Len)
+
+        self.Training_Mean = np.mean(self.Returns, axis = 0)
+        self.Training_Var  = np.var(self.Returns, axis = 0)
+        self.Training_Cov  = np.cov(self.Returns, rowvar = False)
+        self.Training_Merton = self.Merton_Fraction()
 
 
     def reset (self):
@@ -630,7 +665,10 @@ class Simulated_VAR_Env(gym.Env):
             Wealth is initalised as a uniform random variable about 1 as that is the range across which the utlity curve's gradient variaes the most, and a random starting wealth helps the agents to experiance many wealths, and hence better map the value function.
         '''
 
-        self.VAR_Model.reset()
+        if not hasattr(self, 'Returns'):
+            self.Genrate_Returns()
+
+        self.Index = np.random.randint(low = 0, high = self.Returns.shape[0] - self.Episode_Length)
 
         self.Wealth = np.clip(np.random.normal(1, 0.25), 0.25, 1.75)
         self.Tau    = self.Episode_Length * self.VAR_Model.Period
@@ -672,8 +710,8 @@ class Simulated_VAR_Env(gym.Env):
         assert self.action_space.contains(Action), "Action %r (of type %s) is not within the action space." % (Action, type(Action))
         assert self.Done != True, 'Action attempted after epsisode has ended.'
 
-        self.Mkt_Return = self.VAR_Model.step()
-        Investment_Return = (1 + (self.Rf * self.VAR_Model.Period) + np.sum(Action * self.Mkt_Return))
+        self.Index += 1
+        Investment_Return = (1 + (self.Rf * self.VAR_Model.Period) + np.sum(Action * self.Returns[self.Index]))
 
         if self.Risk_Aversion == 1 and self.Intermediate_Reward == True:
             self.Reward = self.Utility(self.Wealth * Investment_Return) - self.Utility(self.Wealth)
@@ -706,7 +744,7 @@ class Simulated_VAR_Env(gym.Env):
             np.array (1D)
                 An observation
         '''
-        return np.append(np.array([self.Wealth, self.Tau]), self.VAR_Model.Factor_Values[-self.Factor_State_Len:][::-1].flatten())
+        return np.append(np.array([self.Wealth, self.Tau]), self.Factors[self.Index])
 
 
     def Gen_Info (self):
@@ -722,7 +760,7 @@ class Simulated_VAR_Env(gym.Env):
         '''
 
         Info = {'Rfree'  : self.Rf,
-                'Mkt-Rf' : self.Mkt_Return}
+                'Mkt-Rf' : self.Returns[self.Index]}
 
         return Info
 
