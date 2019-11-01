@@ -522,7 +522,7 @@ class VAR_Engine:
         Returns = np.zeros((N, self.Num_Assets))
         Factors = np.zeros((N, self.Num_Factors * State_Hist_Len))
 
-        for i in range(200000):
+        for i in range(N):
             Returns[i] = self.step().flatten()
             Factors[i] = self.Factor_Values[-State_Hist_Len:][::-1].flatten()
 
