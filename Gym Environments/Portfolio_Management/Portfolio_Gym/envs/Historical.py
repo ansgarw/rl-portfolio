@@ -368,7 +368,7 @@ class HistoricalEnv(gym.Env):
         '''
 
         Info = {'Mkt-Rf' : self.Return_Data[self.Index],
-                'Rfree'  : self.Rf[self.Index]}
+                'Rfree'  : self.Rf[self.Index][0]}
 
         return Info
 
@@ -479,7 +479,7 @@ class HistoricalEnv(gym.Env):
                 Action = Agent.Predict_Action(State.reshape(1, self.observation_space.shape[0]))
                 State, Reward, Done, Info = self.step(Action.flatten())
                 Returns.append(list(Info['Mkt-Rf']))
-                RF_Returns.append(Info['Rfree'][0])
+                RF_Returns.append(Info['Rfree'])
 
                 if Done:
                     Merton_Return = 1

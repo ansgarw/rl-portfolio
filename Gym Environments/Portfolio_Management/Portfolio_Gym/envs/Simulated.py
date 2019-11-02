@@ -552,6 +552,10 @@ class Simulated_VAR_Env(gym.Env):
         self.Intermediate_Reward = kwargs['Intermediate_Reward']
         self.Factor_State_Len    = kwargs['Factor_State_Len']
         self.Num_Returns         = 200000
+        self.Validation_Frac     = 0.3
+
+        # Flag used to distinguish a training episode from a validation epiodse, to facilitate cross val.
+        self.isTraining = True
 
         self.Wealth = np.clip(np.random.normal(1, 0.25), 0.25, 1.75)
         self.Tau    = self.Episode_Length * self.VAR_Model.Period
@@ -624,6 +628,7 @@ class Simulated_VAR_Env(gym.Env):
         self.Intermediate_Reward = kwargs['Intermediate_Reward'] if 'Intermediate_Reward' in kwargs.keys() else self.Intermediate_Reward
         self.Factor_State_Len    = kwargs['Factor_State_Len']    if 'Factor_State_Len'    in kwargs.keys() else self.Factor_State_Len
         self.Num_Returns         = kwargs['Num_Returns']         if 'Num_Returns'         in kwargs.keys() else self.Num_Returns
+        self.Validation_Frac     = kwargs['Validation_Frac']     if 'Validation_Frac'     in kwargs.keys() else self.Validation_Frac
 
 
         self.observation_space = gym.spaces.Box(low = np.array([0.0, 0.0] + [-100] * self.Factor_State_Len * self.VAR_Model.Num_Factors), high = np.array([self.VAR_Model.Period * self.Episode_Length, 100] + [100] * self.Factor_State_Len * self.VAR_Model.Num_Factors), dtype = np.float32)
@@ -639,9 +644,12 @@ class Simulated_VAR_Env(gym.Env):
 
         self.Returns, self.Factors = self.VAR_Model.Genrate_Returns(self.Num_Returns, self.Factor_State_Len)
 
-        self.Training_Mean = np.mean(self.Returns, axis = 0)
-        self.Training_Var  = np.var(self.Returns, axis = 0)
-        self.Training_Cov  = np.cov(self.Returns, rowvar = False)
+        self.Validation_Start = np.random.randint(low = self.Episode_Length, high = (self.Returns.shape[0] * (1 - self.Validation_Frac)) - self.Episode_Length)
+        self.Validation_End   = self.Validation_Start + int(self.Returns.shape[0] * self.Validation_Frac)
+
+        self.Training_Var    = np.var(np.vstack((self.Returns[0:self.Validation_Start], self.Returns[self.Validation_End:])), axis = 0)
+        self.Training_Mean   = np.mean(np.vstack((self.Returns[0:self.Validation_Start], self.Returns[self.Validation_End:])), axis = 0)
+        self.Training_Cov    = np.cov(np.vstack((self.Returns[0:self.Validation_Start], self.Returns[self.Validation_End:])), rowvar = False)
         self.Training_Merton = self.Merton_Fraction()
 
 
@@ -662,9 +670,15 @@ class Simulated_VAR_Env(gym.Env):
         if not hasattr(self, 'Returns'):
             self.Genrate_Returns()
 
-        self.Index = np.random.randint(low = 0, high = self.Returns.shape[0] - self.Episode_Length)
+        if self.isTraining == True:
+            Possible_Indexes = np.append(np.arange(self.Validation_Start - self.Episode_Length), np.arange(self.Validation_End, self.Returns.shape[0] - self.Episode_Length))
+            self.Index = np.random.choice(Possible_Indexes)
+            self.Wealth = np.clip(np.random.normal(1, 0.25), 0.25, 1.75)
+        else:
+            self.Index = np.random.randint(low = self.Validation_Start, high = self.Validation_End - self.Episode_Length)
+            # When validating we want to start each epsiode with the same wealth, as this makes the terminal utility comparable.
+            self.Wealth = 1
 
-        self.Wealth = np.clip(np.random.normal(1, 0.25), 0.25, 1.75)
         self.Tau    = self.Episode_Length * self.VAR_Model.Period
 
         self.Done   = False
@@ -701,6 +715,7 @@ class Simulated_VAR_Env(gym.Env):
                     'Rfree'  : The risk free rate.
         '''
 
+        assert hasattr(self, 'Returns'), 'Please reset the environment before taking your first step.'
         assert self.action_space.contains(Action), "Action %r (of type %s) is not within the action space." % (Action, type(Action))
         assert self.Done != True, 'Action attempted after epsisode has ended.'
 
@@ -826,6 +841,62 @@ class Simulated_VAR_Env(gym.Env):
             Merton_Leverage = (np.sum(Weights * Data['Mean'])) / (self.Risk_Aversion * Var)
 
             return Weights * Merton_Leverage
+
+
+    def Validate (self, N_Episodes, Agent):
+        '''
+        A validation function used to appraise the performance of an agent across N episodes.
+
+        Parameters
+        ----------
+            N_Episodes | int
+                The number of episodes to validate across.
+
+            Agent | A compatible AC or DQN Agent.
+                The Agent to validate.
+
+        Returns
+        -------
+            A tuple of the following:
+                0. A list of terminal rewards.
+                1. A list of terminal rewards holding the risk free asset
+                2. A list of terminal rewards holding the ex ante merton protfolio (calculated across trianing dataset)
+        '''
+
+        Terminal_Rewards  = []
+        Risk_Free_Rewards = []
+        Merton_Rewards    = []
+
+        self.isTraining = False
+
+        for i in range(N_Episodes):
+            Returns = []
+            RF_Returns = []
+            State = self.reset()
+            Done = False
+
+            while Done == False:
+                Action = Agent.Predict_Action(State.reshape(1, self.observation_space.shape[0]))
+                State, Reward, Done, Info = self.step(Action.flatten())
+                Returns.append(list(Info['Mkt-Rf']))
+                RF_Returns.append(Info['Rfree'])
+
+                if Done:
+                    Merton_Return = 1
+                    RFree_Return  = 1
+                    Returns = np.array(Returns)
+                    for i in range(Returns.shape[0]):
+                        RFree_Return  *= (1 + RF_Returns[i])
+                        Merton_Return *= (1 + RF_Returns[i] + np.sum(Returns[i] * self.Training_Merton))
+
+                    Risk_Free_Rewards.append(self.Utility(RFree_Return))
+                    Merton_Rewards.append(self.Utility(Merton_Return))
+                    Terminal_Rewards.append(Reward)
+
+
+        self.isTraining = True
+        return Terminal_Rewards, Risk_Free_Rewards, Merton_Rewards
+
 
 
 

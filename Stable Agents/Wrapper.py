@@ -24,7 +24,7 @@ class Wrapper:
         self.Agent = Agent
 
 
-    def Train (self, N_Episodes, Plot = [], Diagnostics = []):
+    def Train (self, N_Episodes, Plot = [], Diagnostics = [], Validate = False):
         '''
         Train the agent inside the wrapper so plots may be generated. This is the only function the user needs to call.
 
@@ -52,6 +52,7 @@ class Wrapper:
 
         '''
 
+        self.N_Episodes = N_Episodes
 
         self.Plot = Plot
         self.Diagnostics = Diagnostics
@@ -68,7 +69,7 @@ class Wrapper:
 
         self.Agent.Train(N_Episodes, Arg_A, Arg_B)
 
-        if hasattr(self.Agent.Environment, 'Validate'):
+        if Validate == True:
             self.Plot_Data['Validate'] = self.Agent.Environment.Validate(100, self.Agent)
 
         self.Display()
@@ -131,9 +132,14 @@ class Wrapper:
         i = 0
 
         for j in range(len(self.Diagnostics)):
-            for Data in self.Plot_Data['Diag' + str(j)]:
-                ax[i].plot(Data[0], Data[1])
+            for k, Data in enumerate(self.Plot_Data['Diag' + str(j)]):
+                ax[i].plot(Data[0], Data[1], label = (k / 5) * self.N_Episodes)
                 ax[i].set_title('Diag: ' + self.Diagnostics[j]['Module'] + ', Factor: ' + str(self.Diagnostics[j]['Factor']))
+
+            if self.Diagnostics[j]['Factor'] == 0 and self.Diagnostics[j]['Module'] == 'Critic':
+                # Plot the true critic value in this case:
+                ax[i].plot([None] + list(Data[0][1::]), [None] + list(self.Agent.Environment.Utility(Data[0][1::])), color = 'k')
+            ax[i].legend()
             i += 1
 
         if 'Mu' in self.Plot_Data.keys():
@@ -201,11 +207,17 @@ class Wrapper:
             State = np.zeros((25, self.Agent.State_Dim))
             State[:,0] = 1
             State[:,1] = 0.5
+            State[:,2] = -3.5
 
             if Diag['Factor'] == 0:
                 X = np.linspace(0, 2, 25)
             elif Diag['Factor'] == 1:
                 X = np.linspace(0, 1, 25)
+            elif Diag['Factor'] == 2:
+                X = np.linspace(-4,-3,25)
+            else:
+                X = np.linspace(0,1,25)
+
             State[:, Diag['Factor']] = X
 
             if Diag['Module'] == 'Actor':
