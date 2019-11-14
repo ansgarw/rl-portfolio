@@ -37,9 +37,11 @@ class Wrapper:
                 A list containing keywords for the plots to generate. Acceptable inputs include:
                     1. 'Mu' : This will return a plot of the true (pre sigma/epsilon) predictions made by the agent.
 
-                    2. Merton_Benchmark : Plot the average utility of both the Merton Portfolio and the DQN across 100 episodes (from the training dataset) acting greedily
+                    2. Merton_Benchmark : Plot the average utility of both the Merton Portfolio and the Agent across training, acting greedily
 
                     3. Percent_Merton_Action : Returns the fraction of actions recomended by the actor which are within 10% of the merton portfolio action.
+
+                    4. VAR_Benchmark : Plot the average utility of both the VAR Optimal and the Agent across training, acting greedily
 
             Diagnostics | List (of dict)
                 A list contianing dictionaries identifying the required disgnostic plots. Currently only 2D plots of the sensativity of either the Actor or Critic vs one state parameter may be generated. The dictionaries must include two keys:
@@ -120,6 +122,22 @@ class Wrapper:
                 for exp in Exp:
                     self.Plot_Data['Mu'].append(exp['Mu'])
 
+        if 'VAR_Benchmark' in self.Plot_Data.keys():
+            results = {'Agent'  : [],
+                       'Optimal' : []}
+
+            for episode in Episode_Exps:
+                Optimal_Wealth = 1
+                Agent_Wealth  = 1
+                for step_exp in episode:
+                    Optimal_Wealth *= (1 + step_exp['i']['Rfree'] + np.sum(step_exp['i']['Mkt-Rf'] * self.Agent.Environment.VAR_Benchmark(step_exp['s0'][2])))
+                    Agent_Wealth   *= (1 + step_exp['i']['Rfree'] + np.sum(step_exp['i']['Mkt-Rf'] * step_exp['Mu']))
+
+                results['Agent'].append(self.Agent.Environment.Utility(Agent_Wealth))
+                results['Optimal'].append(self.Agent.Environment.Utility(Optimal_Wealth))
+
+            self.Plot_Data['VAR_Benchmark'].append([np.mean(results['Agent']), np.mean(results['Optimal'])])
+
 
     def Display (self):
         '''
@@ -158,7 +176,17 @@ class Wrapper:
             self.Plot_Data['Merton_Benchmark'] = np.array(self.Plot_Data['Merton_Benchmark'])
             ax[i].scatter(np.arange(self.Plot_Data['Merton_Benchmark'].shape[0]), self.Plot_Data['Merton_Benchmark'][:,0], label = 'Agent',  color = 'lightskyblue')
             ax[i].scatter(np.arange(self.Plot_Data['Merton_Benchmark'].shape[0]), self.Plot_Data['Merton_Benchmark'][:,1], label = 'Merton', color = 'mediumvioletred')
-            ax[i].set_xlabel('Model')
+            ax[i].set_xlabel('Steps (x10000)')
+            ax[i].set_ylabel('Average Terminal Utility')
+            ax[i].legend()
+            i += 1
+
+
+        if 'VAR_Benchmark' in self.Plot_Data.keys():
+            self.Plot_Data['VAR_Benchmark'] = np.array(self.Plot_Data['VAR_Benchmark'])
+            ax[i].scatter(np.arange(self.Plot_Data['VAR_Benchmark'].shape[0]), self.Plot_Data['VAR_Benchmark'][:,0], label = 'Agent',  color = 'lightskyblue')
+            ax[i].scatter(np.arange(self.Plot_Data['VAR_Benchmark'].shape[0]), self.Plot_Data['VAR_Benchmark'][:,1], label = 'Optimal', color = 'mediumvioletred')
+            ax[i].set_xlabel('Steps (x10000)')
             ax[i].set_ylabel('Average Terminal Utility')
             ax[i].legend()
             i += 1
@@ -166,15 +194,8 @@ class Wrapper:
 
         if 'Percent_Merton_Action' in self.Plot_Data.keys():
             ax[i].scatter(np.arange(len(self.Plot_Data['Percent_Merton_Action'])), self.Plot_Data['Percent_Merton_Action'], color = 'mediumvioletred')
-            ax[i].set_xlabel('Model')
+            ax[i].set_xlabel('Steps (x10000)')
             ax[i].set_ylabel('Percentage')
-            i += 1
-
-
-        if 'R_Squared' in self.Plot_Data.keys():
-            ax[i].bar(np.arange(len(self.Plot_Data['R_Squared'])), self.Plot_Data['R_Squared'], color = 'darkblue')
-            ax[i].set_xlabel('Model')
-            ax[i].set_ylabel('R Squared')
             i += 1
 
 

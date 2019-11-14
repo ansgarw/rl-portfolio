@@ -843,6 +843,30 @@ class Simulated_VAR_Env(gym.Env):
             return Weights * Merton_Leverage
 
 
+    def VAR_Benchmark (self, Factor_Value):
+        '''
+        Returns the optimal investment when trading a single asset which follows the VAR model.
+        For this benchmark to be accurate the following requirements must be met:
+            1. The tradeable universe must consist only of a single asset
+            2. The asset must be dependent on a single factor.
+            3. Risk Aversion must be equal to one.
+
+
+        Parameters
+        ----------
+            Factor_Value | float
+                The value of the factor to calculate the optimal return for.
+
+        '''
+
+        assert self.Risk_Aversion == 1, 'VAR_Benchmark may not be used with any Risk_Aversion other than unity.'
+        assert self.VAR_Model.Num_Assets == 1, 'VAR_Benchmark may only be used when the tradeable universe consists of a single stock'
+        assert self.VAR_Model.Num_Factors == 1, 'VAR_Benchmark may only be used when the number of factors equals 1.'
+
+        return (self.VAR_Model.Asset_Beta[0,0] + (self.VAR_Model.Asset_Beta[1,0] * Factor_Value) - np.log(1 + (self.Rf * self.VAR_Model.Period)) + (0.5 * self.VAR_Model.Cov[0,0])) / self.VAR_Model.Cov[0,0]
+
+
+
     def Validate (self, N_Episodes, Agent):
         '''
         A validation function used to appraise the performance of an agent across N episodes.
@@ -896,6 +920,7 @@ class Simulated_VAR_Env(gym.Env):
 
         self.isTraining = True
         return Terminal_Rewards, Risk_Free_Rewards, Merton_Rewards
+
 
 
 
