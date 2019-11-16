@@ -5,17 +5,10 @@ import gym
 import os
 from scipy.optimize import minimize
 
-
-# If you mess it up just pull from the Git.
-# The first objective is to remove any use of pandas in the high frequency areas of the environment
-
-# Previous versions of the historical environment were bloated with default settings for a myriad of CSVs.
-# Now the enviornment has onde Defualt csv and may be overloaded with a different one by the user.
-
 # Global "Constants"
-_Default_Filename = os.path.realpath(__file__).replace("Historical.py", "Monthly_Data.csv")
+_Default_Filename = os.path.realpath(__file__).replace("PortfolioEnvs.py", "Monthly_Data.csv")
 
-class HistoricalEnv(gym.Env):
+class Portfolio_Env(gym.Env):
 
     '''
     A gym environment used to train RL Portfolio management agents with historical data.
@@ -43,17 +36,19 @@ class HistoricalEnv(gym.Env):
         self.action_space = gym.spaces.Box(low = kwargs['Min_Leverage'], high = kwargs['Max_Leverage'], shape = (1,), dtype = np.float32)
 
         # Set up the default dataset.
-        self.Data = pd.read_csv(_Default_Filename)
-        self.State_Parameters = ['D12', 'E12', 'DY', 'EY', 'DP', 'DE', 'svar', 'infl', 'AAA', 'BAA', 'lty', 'defaultspread', 'tbl',
+        Data = pd.read_csv(_Default_Filename)
+        self.State_Parameters = ['DY', 'EY', 'DP', 'DE', 'svar', 'infl', 'AAA', 'BAA', 'lty', 'defaultspread', 'tbl',
                                  'b/m', 'ntis', 'ltr', 'corpr', 'CRSP_SPvw', 'CRSP_SPvwx', 'Mom', 'HML', 'SMB']
 
-        self.Data = self.Data[self.State_Parameters + ['Fama Mkt Excess', '1M TBill']]
-        self.Data = self.Data.dropna()
-        self.Data.reset_index(drop = True, inplace = True)
+        Data = Data[self.State_Parameters + ['Fama Mkt Excess', '1M TBill']]
+        Data = Data.dropna()
+        Data.reset_index(drop = True, inplace = True)
 
-        self.Return_Data = self.Data['Fama Mkt Excess'].values.reshape(-1,1)
-        self.State_Data  = self.Data[self.State_Parameters].values.reshape(-1, len(self.State_Parameters))
-        self.Rf          = self.Data['1M TBill'].values.reshape(-1,1)
+        self.Return_Data = Data['Fama Mkt Excess'].values.reshape(-1,1)
+        self.State_Data  = Data[self.State_Parameters].values.reshape(-1, len(self.State_Parameters))
+        self.Rf          = Data['1M TBill'].values.reshape(-1,1)
+
+        self.Accepted_Keywords = ('Risk_Aversion', 'Episode_Length', 'Max_Leverage', 'Min_Leverage', 'Validation_Frac', 'Intermediate_Reward', 'DataBase', 'State_Parameters', 'Return_Key', 'Risk_Free_Key', 'Time_Step')
 
 
         # Plus two as wealth and tau are also part of the state space.
@@ -141,73 +136,51 @@ class HistoricalEnv(gym.Env):
 
             Data ends 2019.
 
-        '''
 
-        self.Risk_Aversion       = kwargs['Risk_Aversion']       if 'Risk_Aversion'       in kwargs.keys() else self.Risk_Aversion
-        self.Episode_Length      = kwargs['Episode_Length']      if 'Episode_Length'      in kwargs.keys() else self.Episode_Length
-        self.Max_Leverage        = kwargs['Max_Leverage']        if 'Max_Leverage'        in kwargs.keys() else self.Max_Leverage
-        self.Min_Leverage        = kwargs['Min_Leverage']        if 'Min_Leverage'        in kwargs.keys() else self.Min_Leverage
-        self.Validation_Frac     = kwargs['Validation_Frac']     if 'Validation_Frac'     in kwargs.keys() else self.Validation_Frac
-        self.Intermediate_Reward = kwargs['Intermediate_Reward'] if 'Intermediate_Reward' in kwargs.keys() else self.Intermediate_Reward
+        Notes
+        -----
+            Parameters ['D12', 'E12'] are non-stationary, hence must not be included in the state parameters
+            Parameter 'DE' contains a single (anomolous) entry which is 4x higher than average.
+
+        '''
 
         if 'DataBase' in kwargs.keys():
             assert set(['Return_Key', 'Risk_Free_Key', 'State_Parameters']).issubset(set(kwargs.keys())), 'Please specify State_Parameters, Return_Key and Risk_Free_Key when using a custom database.'
 
-            if 'Time_Step' in kwargs.keys() : self.Time_Step = kwargs['Time_Step']
+        if 'Time_Step' in kwargs.keys():
+            assert 'DataBase' in kwargs.keys(), 'Only specify Time_Step if a new DataBase is in use.'
 
-            # Set up the new dataset.
-            self.Data = kwargs['DataBase']
-            self.State_Parameters = kwargs['State_Parameters']
+        if 'Time_Step'           in kwargs.keys() : self.Time_Step           = kwargs['Time_Step']
+        if 'Max_Leverage'        in kwargs.keys() : self.Max_Leverage        = kwargs['Max_Leverage']
+        if 'Min_Leverage'        in kwargs.keys() : self.Min_Leverage        = kwargs['Min_Leverage']
+        if 'Risk_Aversion'       in kwargs.keys() : self.Risk_Aversion       = kwargs['Risk_Aversion']
+        if 'Episode_Length'      in kwargs.keys() : self.Episode_Length      = kwargs['Episode_Length']
+        if 'Validation_Frac'     in kwargs.keys() : self.Validation_Frac     = kwargs['Validation_Frac']
+        if 'State_Parameters'    in kwargs.keys() : self.State_Parameters    = kwargs['State_Parameters']
+        if 'Intermediate_Reward' in kwargs.keys() : self.Intermediate_Reward = kwargs['Intermediate_Reward']
 
-            if isinstance(kwargs['Return_Key'], list):
-                self.Data = self.Data[self.State_Parameters + kwargs['Return_Key'] + [kwargs['Risk_Free_Key']]]
-                self.Data = self.Data.dropna()
-                self.Data.reset_index(drop = True, inplace = True)
+        Data          = kwargs['DataBase']      if 'DataBase'      in kwargs.keys() else pd.read_csv(_Default_Filename)
+        Return_Key    = kwargs['Return_Key']    if 'Return_Key'    in kwargs.keys() else 'Fama Mkt Excess'
+        Risk_Free_Key = kwargs['Risk_Free_Key'] if 'Risk_Free_Key' in kwargs.keys() else '1M TBill'
 
-                self.Return_Data = self.Data[kwargs['Return_Key']].values.reshape(-1, len(kwargs['Return_Key']))
-                self.State_Data  = self.Data[self.State_Parameters].values.reshape(-1, len(self.State_Parameters))
-                self.Rf          = self.Data[kwargs['Risk_Free_Key']].values.reshape(-1, 1)
+        if isinstance(Return_Key, list):
+            Data = Data[self.State_Parameters + Return_Key + [Risk_Free_Key]]
+        else:
+            Data = Data[self.State_Parameters + [Return_Key, Risk_Free_Key]]
 
-            else:
-                self.Data = self.Data[self.State_Parameters + [kwargs['Return_Key'], kwargs['Risk_Free_Key']]]
-                self.Data = self.Data.dropna()
-                self.Data.reset_index(drop = True, inplace = True)
+        Data = Data.dropna()
+        Data.reset_index(drop = True, inplace = True)
 
-                self.Return_Data = self.Data[kwargs['Return_Key']].values.reshape(-1,1)
-                self.State_Data  = self.Data[self.State_Parameters].values.reshape(-1, len(self.State_Parameters))
-                self.Rf          = self.Data[kwargs['Risk_Free_Key']].values.reshape(-1, 1)
-
-
-        # Now check if any of the state data needs overloading with the default data
-        elif ('State_Parameters' in kwargs.keys()) or ('Return_Key' in kwargs.keys()) or ('Risk_Free_Key' in kwargs.keys()):
-
-            assert not isinstance(kwargs["Return_Key"], list), 'Multiple assets may not be used with default database.'
-
-            self.State_Parameters = kwargs['State_Parameters'] if 'State_Parameters' in kwargs.keys() else self.State_Parameters
-            Return_Key            = kwargs['Return_Key']       if 'Return_Key'       in kwargs.keys() else 'Fama Mkt Excess'
-            Risk_Free_Key         = kwargs['Risk_Free_Key']    if 'Risk_Free_Key'    in kwargs.keys() else '1M TBill'
-
-            self.Data = pd.read_csv(_Default_Filename)
-            self.Data = self.Data[self.State_Parameters + [Return_Key, Risk_Free_Key]]
-
-            self.Data = self.Data.dropna()
-            self.Data.reset_index(drop = True, inplace = True)
-
-            self.Return_Data = self.Data[Return_Key].values.reshape(-1,1)
-            self.State_Data  = self.Data[self.State_Parameters].values.reshape(-1, len(self.State_Parameters))
-            self.Rf          = self.Data[Risk_Free_Key].values.reshape(-1,1)
-
+        self.Return_Data = Data[Return_Key].values.reshape(-1,1)
+        self.State_Data  = Data[self.State_Parameters].values
+        self.Rf          = Data[Risk_Free_Key].values.reshape(-1,1)
 
         self.action_space = gym.spaces.Box(low = np.array([self.Min_Leverage] * self.Return_Data.shape[1]), high = np.array([self.Max_Leverage] * self.Return_Data.shape[1]), dtype = np.float32)
-        self.observation_space = gym.spaces.Box(low = np.array([-np.inf] * (self.State_Data.shape[1] + 2)), high = np.array([np.inf] * (self.State_Data.shape[1] + 2)), dtype = np.float32)
-
+        self.observation_space = gym.spaces.Box(low = np.array([-np.inf] * (len(self.State_Parameters) + 2)), high = np.array([np.inf] * (len(self.State_Parameters) + 2)), dtype = np.float32)
 
         for key in kwargs.keys():
-            if not key in ('Risk_Aversion', 'Episode_Length', 'Max_Leverage', 'Min_Leverage', 'Validation_Frac', 'Intermediate_Reward', 'DataBase', 'State_Parameters', 'Return_Key', 'Risk_Free_Key', 'Time_Step'):
+            if not key in self.Accepted_Keywords:
                 print("Keyword:", key, "not recognised.")
-
-        if "Time_Step" in kwargs.keys() and not 'DataBase' in kwargs.keys():
-            warnings.warn("Time_Step may not be changed unless the database is overridden")
 
         if self.Risk_Aversion != 1 and self.Intermediate_Reward == True:
             print("Warning: Intermediate Reward as no effect when Risk Aversion is not equal to one.")
@@ -226,11 +199,11 @@ class HistoricalEnv(gym.Env):
         '''
 
         if Set_last == False:
-            self.Validation_Start = np.random.randint(low = self.Episode_Length, high = (self.State_Data.shape[0] * (1 - self.Validation_Frac)) - self.Episode_Length)
-            self.Validation_End   = self.Validation_Start + int(self.State_Data.shape[0] * self.Validation_Frac)
+            self.Validation_Start = np.random.randint(low = self.Episode_Length, high = (self.Return_Data.shape[0] * (1 - self.Validation_Frac)) - self.Episode_Length)
+            self.Validation_End   = self.Validation_Start + int(self.Return_Data.shape[0] * self.Validation_Frac)
         else:
-            self.Validation_Start = int(self.State_Data.shape[0] * (1 - self.Validation_Frac))
-            self.Validation_End   = int(self.State_Data.shape[0])
+            self.Validation_Start = int(self.Return_Data.shape[0] * (1 - self.Validation_Frac))
+            self.Validation_End   = int(self.Return_Data.shape[0])
 
         Mean = np.mean(np.vstack((self.Return_Data[0:self.Validation_Start], self.Return_Data[self.Validation_End:])), axis = 0)
         Vars = np.var(np.vstack((self.Return_Data[0:self.Validation_Start], self.Return_Data[self.Validation_End:])), axis = 0)
@@ -258,7 +231,7 @@ class HistoricalEnv(gym.Env):
         '''
 
         if self.isTraining == True:
-            Possible_Indexes = np.append(np.arange(self.Validation_Start - self.Episode_Length), np.arange(self.Validation_End, self.State_Data.shape[0] - self.Episode_Length))
+            Possible_Indexes = np.append(np.arange(self.Validation_Start - self.Episode_Length), np.arange(self.Validation_End, self.Return_Data.shape[0] - self.Episode_Length))
             self.Start_Index = np.random.choice(Possible_Indexes)
             self.Wealth = np.clip(np.random.normal(1, 0.25), 0.25, 1.75)
         else:
@@ -316,6 +289,8 @@ class HistoricalEnv(gym.Env):
         assert self.Done == False, "Attempt to take an action whilst Done == True"
         assert self.action_space.contains(Action), "Action %r is not within the action space" % (Action)
 
+        self.Index += 1
+
         Return = (1 + self.Rf[self.Index][0] + np.sum(self.Return_Data[self.Index] * Action))
 
         if self.Intermediate_Reward == True and self.Risk_Aversion == 1:
@@ -323,7 +298,6 @@ class HistoricalEnv(gym.Env):
         else:
             self.Reward = 0
 
-        self.Index += 1
         self.Wealth *= Return
 
         if (self.Index >= self.End_Index) or (self.Wealth <= 0):
@@ -351,8 +325,9 @@ class HistoricalEnv(gym.Env):
                 An observation
         '''
 
-        Tau = (self.End_Index - self.Index) / (1 / self.Time_Step)
-        return np.append([self.Wealth, Tau], self.State_Data[self.Index])
+        Tau   = (self.End_Index - self.Index) / (1 / self.Time_Step)
+        State = self.State_Data[self.Index] if len(self.State_Parameters) > 0 else []
+        return np.append([self.Wealth, Tau], State)
 
 
     def Gen_Info (self):
@@ -412,7 +387,7 @@ class HistoricalEnv(gym.Env):
 
     def Merton_Fraction (self):
         '''
-        Calculates the merton portfolio fraction if there is only one asset, or the Markowitz portfolio and Merton portfolio fraction if multiple assets are being used.
+        Calculates the Merton portfolio fraction if there is only one asset, or the Markowitz portfolio and Merton portfolio fraction if multiple assets are being used.
 
         Returns
         -------
@@ -536,3 +511,288 @@ def Sharpe_Ratio(Weights, Data):
     Sharpe = Excess_ret / (Var ** 0.5)[0,0]
 
     return -np.abs(Sharpe)
+
+
+
+class Sim_GBM_Env (Portfolio_Env):
+
+    def __init__ (self, **kwargs):
+
+        super(Sim_GBM_Env, self).__init__(**kwargs)
+
+        self.Mu    = kwargs['Mu']
+        self.Rf_   = kwargs['Rf']
+        self.Row   = kwargs['Row']
+        self.Sigma = kwargs['Sigma']
+
+        self.DataBase_Len = 200000
+
+        self.Setup()
+
+
+    def Set_Params (self, **kwargs):
+
+        if 'Mu'    in kwargs.keys() : self.Mu    = kwargs['Mu']
+        if 'Rf'    in kwargs.keys() : self.Rf_   = kwargs['Rf']
+        if 'Row'   in kwargs.keys() : self.Row   = kwargs['Row']
+        if 'Sigma' in kwargs.keys() : self.Sigma = kwargs['Sigma']
+
+        if 'Time_Step'    in kwargs.keys() : self.Time_Step    = kwargs['Time_Step']
+        if 'DataBase_Len' in kwargs.keys() : self.DataBase_Len = kwargs['DataBase_Len']
+
+        self.Setup(**kwargs)
+
+
+    def Setup (self, **kwargs):
+
+        if isinstance(self.Row, float):
+            self.Row = np.array([[1, self.Row], [self.Row, 1]])
+
+        if isinstance(self.Mu, int) or isinstance(self.Mu, float):
+            Mean = (self.Mu - (self.Sigma ** 2) / 2) * self.Time_Step
+            Std = self.Sigma * (self.Time_Step ** 0.5)
+            Mkt_Return = (np.exp(np.random.normal(Mean, Std, size = self.DataBase_Len)) - 1) - (self.Rf_ * self.Time_Step)
+
+        else:
+            Means = (self.Mu - (self.Sigma ** 2) / 2) * self.Time_Step
+            Stds  = (self.Sigma * (self.Time_Step ** 0.5)).reshape(-1,1)
+            Covs  = self.Row * np.matmul(Stds, Stds.T)
+            Mkt_Return = (np.exp(np.random.multivariate_normal(Means, Covs, size = self.DataBase_Len)) - 1) - (self.Rf_ * self.Time_Step)
+
+        Data = pd.DataFrame(columns = ['Mkt-Rf'], data = Mkt_Return)
+        Data.loc[:, 'Rf'] = np.ones(self.DataBase_Len) * self.Rf_
+
+        kwargs['DataBase'] = Data
+        kwargs['Return_Key'] = 'Mkt-Rf'
+        kwargs['Risk_Free_Key'] = 'Rf'
+        kwargs['State_Parameters'] = []
+
+        super(Sim_GBM_Env, self).Set_Params(**kwargs)
+
+
+
+class VAR_Engine:
+
+    '''
+    This model is capable of generating the returns of N corolated assets as well as M autoregressive factors, upon which the assets have linear dependence.
+    The input is a little complex and best explained through an example:
+
+
+
+        Example 1 :
+            A single asset and a single factor. The asset return at time t+1 is dependent upon the factor at time t and t-1. The factor at time t+1 is dependent upon the factor at time t. Under these settings the model becomes:
+
+            ln(1 + Return[t+1]) = Asset_Beta[0,0] + Asset_Beta[0,1] * Factor_1[t] + Asset_Beta[0,2] * Factor_1[t-1] + Epsilon[0]
+            Factor_1[t+1] = Factor_Beta[0,0] + Factor_Beta[0,1] * Factor_1[t] + Epsilon[1]
+
+            where:
+                Epsilon = MVN(0, Cov)
+
+
+
+        Example 2:
+            A single asset with two factors. The asset return at time t+1 is dependent upon both factors at time t and t-1. Each factor at time t+1 is dependent upon itself at time t and t-1. Under these settings the model becomes:
+
+            ln(1 + Return[t+1]) = Asset_Beta[0,0] + (Asset_Beta[0,1] * Factor_1[t]) + (Asset_Beta[0,2] * Factor_2[t]) + (Asset_Beta[0,3] * Factor_1[t-1]) + (Asset_Beta[0,4] * Factor_2[t-1]) + Epsilon[0]
+            Factor_1[t+1] = Factor_Beta[0,0] + (Factor_Beta[0,1] * Factor_1[t]) + (Factor_Beta[0,2] * Factor_1[t-1]) + Epsilon[1]
+            Factor_2[t+1] = Factor_Beta[1,0] + (Factor_Beta[1,1] * Factor_2[t]) + (Factor_Beta[1,2] * Factor_2[t-1]) + Epsilon[1]
+
+
+
+        To include another asset, simple add another column to Asset_Beta, using the same structure as before. The model will automatically calculate how many periods of factors to include when generating the factors and asset returns based upon the length of the Asset_Beta and Factor_Beta inputs.
+
+
+
+
+
+        Since generating setups for this model can be complex the following presets can be used:
+
+        Brandt Market and dividend to price ratio
+            'Factor_Beta' : numpy.array([-0.1694, 0.9514]).reshape(-1,1)
+            'Asset_Beta'  : numpy.array([0.2049, 0.0568]).reshape(-1,1)
+            'Cov'         : numpy.array([[6.225, -6.044], [-6.044, 6.316]]) * 1e-3
+            'Period'      : 0.25
+
+
+        Single asset single factor with high R2 (Should allow more dramatic outperformance of the RL Agents)
+            'Factor_Beta' : np.array([-0.1694, 0.9514]).reshape(-1,1)
+            'Asset_Beta'  : np.array([0.5549, 0.1568]).reshape(-1,1)
+            'Cov'         : np.array([[6.225, -6.044], [-6.044, 6.316]]) * 1e-3
+            'Period'      : 0.25
+
+
+
+    '''
+
+    def __init__ (self, Factor_Beta, Asset_Beta, Cov, Period):
+
+        '''
+        Parameters
+        ----------
+            Factor_Beta | np.array (2D)
+                The Autoregressive betas of the factor(s), see examples above for structure.
+
+            Asset_Beta | np.array (2D)
+                The linear dependence of the asset(s) upon the last N values of the factor(s). See examples for structure.
+
+            Cov | np.array (2D, Square)
+                The covariance matrix of the Assets and the Factors.
+
+            Period | float
+                The time_step between subsequent returns.
+        '''
+
+        self.Factor_Beta = Factor_Beta
+        self.Asset_Beta  = Asset_Beta
+        self.Cov         = Cov
+        self.Period      = Period
+
+        # First calculate some problem dimensions
+        self.Num_Assets    = self.Asset_Beta.shape[1]
+        self.Num_Factors   = self.Factor_Beta.shape[1]
+        self.Asset_AR_len  = int((self.Asset_Beta.shape[0] - 1) / self.Num_Factors)
+        self.Factor_AR_len = self.Factor_Beta.shape[0] - 1
+
+        assert self.Asset_Beta.shape[0] == 1 + self.Asset_AR_len * self.Num_Factors, 'Ensure that the asset corrolates to each factor for the same number of periods'
+        assert self.Cov.shape[0] == self.Num_Assets + self.Num_Factors, 'Cov dimensions do not match the number of assets and factors'
+
+
+    def reset (self):
+        '''
+        Reset the model.
+        Generate enough preiods values for the factors to begin calculating the Asset return including their dependence. Factors are initiated at their stationary point + a small amount of noise.
+        '''
+
+        self.Factor_Values = np.ones((max(self.Factor_AR_len, self.Asset_AR_len), self.Num_Factors))
+        for i in range(self.Factor_Values.shape[1]):
+            self.Factor_Values[:,i] *= (self.Factor_Beta[0,i] / (1 - np.sum(self.Factor_Beta[1:,i]))) + np.random.normal(0, self.Cov[i,i] ** 0.5)
+
+
+    def step (self):
+        '''
+        Step the model forward by one period.
+
+        Returns
+        -------
+            np.array (1D)
+                The returns of the assets across the period.
+        '''
+
+        if not hasattr(self, 'Factor_Values') : self.reset()
+
+        Epsilon = np.random.multivariate_normal(np.zeros(self.Cov.shape[0]), self.Cov)
+
+        New_Factors = self.Factor_Beta[0] + np.sum(self.Factor_Beta[1:] * self.Factor_Values[-self.Factor_AR_len:][::-1], axis = 0) + Epsilon[self.Num_Assets:]
+
+        Return_X = self.Factor_Values[-self.Asset_AR_len:][::-1].reshape(-1,1)
+        for _ in range(self.Num_Assets-1):
+            Return_X = np.hstack((Return_X, Return_X[:,0].reshape(-1,1)))
+        New_Returns = self.Asset_Beta[0] + np.sum(self.Asset_Beta[1:] * Return_X, axis = 0) + Epsilon[:self.Num_Assets]
+
+        self.Factor_Values = np.vstack((self.Factor_Values, New_Factors.reshape(1,-1)))
+
+        return np.exp(New_Returns) - 1
+
+
+    def Genrate_Returns (self, N, State_Hist_Len = 1):
+        '''
+
+        Parameters
+        ----------
+            N | int
+                The number of periods of returns to generate.
+
+            State_Hist_Len | int
+                The number of periods of factors to include in the state.
+
+        Returns
+        -------
+            A tuple containing the following data:
+
+            1. np.array (2D)
+                Asset returns for N consecutive periods
+
+            2. np.array (2D)
+                The values of the factors for N consecutive periods
+
+        Notes
+        -----
+            Due to the possible complexity of this model, it is necessary to calculate the moments of the asset(s) numerically.
+
+        '''
+
+        self.reset()
+        Returns = np.zeros((N, self.Num_Assets))
+        Factors = np.zeros((N, self.Num_Factors * State_Hist_Len))
+
+        for i in range(N):
+            Returns[i] = self.step().flatten()
+            Factors[i] = self.Factor_Values[-State_Hist_Len:][::-1].flatten()
+
+        self.reset()
+
+        return Returns, Factors
+
+
+
+class Sim_VAR_Env (Portfolio_Env):
+
+    def __init__ (self, **kwargs):
+        super(Sim_VAR_Env, self).__init__(**kwargs)
+
+        self.VAR_Model = VAR_Engine(kwargs['Factor_Beta'], kwargs['Asset_Beta'], kwargs['Cov'], kwargs['Time_Step'])
+        self.Rf_ = kwargs['Rf']
+        self.DataBase_Len = 75000
+        self.Factor_State_Len = kwargs['Factor_State_Len']
+
+        self.Setup()
+
+
+    def Set_Params (self, **kwargs):
+
+        if 'Rf'               in kwargs.keys() : self.Rf_              = kwargs['Rf']
+        if 'DataBase_Len'     in kwargs.keys() : self.DataBase_Len     = kwargs['DataBase_Len']
+        if 'Factor_State_Len' in kwargs.keys() : self.Factor_State_Len = kwargs['Factor_State_Len']
+
+        if set(['Factor_Beta', 'Asset_Beta', 'Cov', 'Time_Step']).issubset(set(kwargs.keys())):
+            self.VAR_Model = VAR_Engine(kwargs['Factor_Beta'], kwargs['Asset_Beta'], kwargs['Cov'], kwargs['Time_Step'])
+
+        self.Setup(**kwargs)
+
+
+    def Setup (self, **kwargs):
+        Mkt_Returns, Factors = self.VAR_Model.Genrate_Returns(self.DataBase_Len, self.Factor_State_Len)
+        Rfree = np.ones((self.DataBase_Len, 1)) * self.Rf_
+        columns = ['Asset_' + str(i) for i in range(self.VAR_Model.Num_Assets)] + ['Rfree'] + ['Factor_' + str(i) for i in range(self.VAR_Model.Num_Factors)]
+
+        Data = pd.DataFrame(columns = columns, data = np.hstack((Mkt_Returns, Rfree, Factors)))
+
+        kwargs['DataBase'] = Data
+        kwargs['Return_Key'] = ['Asset_' + str(i) for i in range(self.VAR_Model.Num_Assets)]
+        kwargs['Risk_Free_Key'] = 'Rfree'
+        kwargs['State_Parameters'] = ['Factor_' + str(i) for i in range(self.VAR_Model.Num_Factors)]
+
+        super(Sim_VAR_Env, self).Set_Params(**kwargs)
+
+
+    def VAR_Benchmark (self, Factor_Value):
+        '''
+        Returns the optimal investment when trading a single asset which follows the VAR model.
+        For this benchmark to be accurate the following requirements must be met:
+            1. The tradeable universe must consist only of a single asset
+            2. The asset must be dependent on a single factor.
+            3. Risk Aversion must be equal to one.
+
+
+        Parameters
+        ----------
+            Factor_Value | float
+                The value of the factor to calculate the optimal return for.
+
+        '''
+
+        assert self.Risk_Aversion == 1, 'VAR_Benchmark may not be used with any Risk_Aversion other than unity.'
+        assert self.VAR_Model.Num_Assets == 1, 'VAR_Benchmark may only be used when the tradeable universe consists of a single stock'
+        assert self.VAR_Model.Num_Factors == 1, 'VAR_Benchmark may only be used when the number of factors equals 1.'
+
+        return (self.VAR_Model.Asset_Beta[0,0] + (self.VAR_Model.Asset_Beta[1,0] * Factor_Value) - np.log(1 + (self.Rf_ * self.VAR_Model.Period)) + (0.5 * self.VAR_Model.Cov[0,0])) / self.VAR_Model.Cov[0,0]

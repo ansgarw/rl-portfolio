@@ -1,3 +1,1 @@
-from Portfolio_Gym.envs.Simulated  import SimulatedEnv
-from Portfolio_Gym.envs.Simulated  import Simulated_VAR_Env
-from Portfolio_Gym.envs.Historical import HistoricalEnv
+from Portfolio_Gym.envs.PortfolioEnvs import Portfolio_Env, Sim_GBM_Env, Sim_VAR_Env
