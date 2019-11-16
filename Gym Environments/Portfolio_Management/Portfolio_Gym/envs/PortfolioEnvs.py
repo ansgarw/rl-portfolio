@@ -48,7 +48,7 @@ class Portfolio_Env(gym.Env):
         self.State_Data  = Data[self.State_Parameters].values.reshape(-1, len(self.State_Parameters))
         self.Rf          = Data['1M TBill'].values.reshape(-1,1)
 
-        self.Accepted_Keywords = ('Risk_Aversion', 'Episode_Length', 'Max_Leverage', 'Min_Leverage', 'Validation_Frac', 'Intermediate_Reward', 'DataBase', 'State_Parameters', 'Return_Key', 'Risk_Free_Key', 'Time_Step')
+        self.Accepted_Keywords = {'Risk_Aversion', 'Episode_Length', 'Max_Leverage', 'Min_Leverage', 'Validation_Frac', 'Intermediate_Reward', 'DataBase', 'State_Parameters', 'Return_Key', 'Risk_Free_Key', 'Time_Step'}
 
 
         # Plus two as wealth and tau are also part of the state space.
@@ -150,30 +150,41 @@ class Portfolio_Env(gym.Env):
         if 'Time_Step' in kwargs.keys():
             assert 'DataBase' in kwargs.keys(), 'Only specify Time_Step if a new DataBase is in use.'
 
-        if 'Time_Step'           in kwargs.keys() : self.Time_Step           = kwargs['Time_Step']
-        if 'Max_Leverage'        in kwargs.keys() : self.Max_Leverage        = kwargs['Max_Leverage']
-        if 'Min_Leverage'        in kwargs.keys() : self.Min_Leverage        = kwargs['Min_Leverage']
-        if 'Risk_Aversion'       in kwargs.keys() : self.Risk_Aversion       = kwargs['Risk_Aversion']
-        if 'Episode_Length'      in kwargs.keys() : self.Episode_Length      = kwargs['Episode_Length']
-        if 'Validation_Frac'     in kwargs.keys() : self.Validation_Frac     = kwargs['Validation_Frac']
-        if 'State_Parameters'    in kwargs.keys() : self.State_Parameters    = kwargs['State_Parameters']
-        if 'Intermediate_Reward' in kwargs.keys() : self.Intermediate_Reward = kwargs['Intermediate_Reward']
+        if len(set(kwargs.keys()).intersection({'DataBase', 'Return_Key', 'Risk_Free_Key', 'State_Parameters'})) > 0:
 
-        Data          = kwargs['DataBase']      if 'DataBase'      in kwargs.keys() else pd.read_csv(_Default_Filename)
-        Return_Key    = kwargs['Return_Key']    if 'Return_Key'    in kwargs.keys() else 'Fama Mkt Excess'
-        Risk_Free_Key = kwargs['Risk_Free_Key'] if 'Risk_Free_Key' in kwargs.keys() else '1M TBill'
+            if 'Time_Step'           in kwargs.keys() : self.Time_Step           = kwargs['Time_Step']
+            if 'Max_Leverage'        in kwargs.keys() : self.Max_Leverage        = kwargs['Max_Leverage']
+            if 'Min_Leverage'        in kwargs.keys() : self.Min_Leverage        = kwargs['Min_Leverage']
+            if 'Risk_Aversion'       in kwargs.keys() : self.Risk_Aversion       = kwargs['Risk_Aversion']
+            if 'Episode_Length'      in kwargs.keys() : self.Episode_Length      = kwargs['Episode_Length']
+            if 'Validation_Frac'     in kwargs.keys() : self.Validation_Frac     = kwargs['Validation_Frac']
+            if 'State_Parameters'    in kwargs.keys() : self.State_Parameters    = kwargs['State_Parameters']
+            if 'Intermediate_Reward' in kwargs.keys() : self.Intermediate_Reward = kwargs['Intermediate_Reward']
 
-        if isinstance(Return_Key, list):
-            Data = Data[self.State_Parameters + Return_Key + [Risk_Free_Key]]
+            Data          = kwargs['DataBase']      if 'DataBase'      in kwargs.keys() else pd.read_csv(_Default_Filename)
+            Return_Key    = kwargs['Return_Key']    if 'Return_Key'    in kwargs.keys() else 'Fama Mkt Excess'
+            Risk_Free_Key = kwargs['Risk_Free_Key'] if 'Risk_Free_Key' in kwargs.keys() else '1M TBill'
+
+            if isinstance(Return_Key, list):
+                Data = Data[self.State_Parameters + Return_Key + [Risk_Free_Key]]
+            else:
+                Data = Data[self.State_Parameters + [Return_Key, Risk_Free_Key]]
+
+            Data = Data.dropna()
+            Data.reset_index(drop = True, inplace = True)
+
+            self.Return_Data = Data[Return_Key].values.reshape(-1,1)
+            self.State_Data  = Data[self.State_Parameters].values
+            self.Rf          = Data[Risk_Free_Key].values.reshape(-1,1)
+
         else:
-            Data = Data[self.State_Parameters + [Return_Key, Risk_Free_Key]]
+            if 'Max_Leverage'        in kwargs.keys() : self.Max_Leverage        = kwargs['Max_Leverage']
+            if 'Min_Leverage'        in kwargs.keys() : self.Min_Leverage        = kwargs['Min_Leverage']
+            if 'Risk_Aversion'       in kwargs.keys() : self.Risk_Aversion       = kwargs['Risk_Aversion']
+            if 'Episode_Length'      in kwargs.keys() : self.Episode_Length      = kwargs['Episode_Length']
+            if 'Validation_Frac'     in kwargs.keys() : self.Validation_Frac     = kwargs['Validation_Frac']
+            if 'Intermediate_Reward' in kwargs.keys() : self.Intermediate_Reward = kwargs['Intermediate_Reward']
 
-        Data = Data.dropna()
-        Data.reset_index(drop = True, inplace = True)
-
-        self.Return_Data = Data[Return_Key].values.reshape(-1,1)
-        self.State_Data  = Data[self.State_Parameters].values
-        self.Rf          = Data[Risk_Free_Key].values.reshape(-1,1)
 
         self.action_space = gym.spaces.Box(low = np.array([self.Min_Leverage] * self.Return_Data.shape[1]), high = np.array([self.Max_Leverage] * self.Return_Data.shape[1]), dtype = np.float32)
         self.observation_space = gym.spaces.Box(low = np.array([-np.inf] * (len(self.State_Parameters) + 2)), high = np.array([np.inf] * (len(self.State_Parameters) + 2)), dtype = np.float32)
@@ -527,6 +538,9 @@ class Sim_GBM_Env (Portfolio_Env):
 
         self.DataBase_Len = 200000
 
+        self.Accepted_Keywords = self.Accepted_Keywords.union({'Mu', 'Sigma', 'Row', 'Rf', 'DataBase_Len'})
+
+
         self.Setup()
 
 
@@ -742,10 +756,12 @@ class Sim_VAR_Env (Portfolio_Env):
 
         self.VAR_Model = VAR_Engine(kwargs['Factor_Beta'], kwargs['Asset_Beta'], kwargs['Cov'], kwargs['Time_Step'])
         self.Rf_ = kwargs['Rf']
-        self.DataBase_Len = 75000
+        self.DataBase_Len = 10000
         self.Factor_State_Len = kwargs['Factor_State_Len']
 
-        self.Setup()
+        self.Accepted_Keywords = self.Accepted_Keywords.union({'Factor_Beta', 'Asset_Beta', 'Cov', 'Factor_State_Len', 'Rf', 'DataBase_Len'})
+
+        self.Setup(**kwargs)
 
 
     def Set_Params (self, **kwargs):
@@ -761,16 +777,17 @@ class Sim_VAR_Env (Portfolio_Env):
 
 
     def Setup (self, **kwargs):
-        Mkt_Returns, Factors = self.VAR_Model.Genrate_Returns(self.DataBase_Len, self.Factor_State_Len)
-        Rfree = np.ones((self.DataBase_Len, 1)) * self.Rf_
-        columns = ['Asset_' + str(i) for i in range(self.VAR_Model.Num_Assets)] + ['Rfree'] + ['Factor_' + str(i) for i in range(self.VAR_Model.Num_Factors)]
+        if set(['Factor_Beta', 'Asset_Beta', 'Cov', 'Time_Step']).issubset(set(kwargs.keys())):
+            Mkt_Returns, Factors = self.VAR_Model.Genrate_Returns(self.DataBase_Len, self.Factor_State_Len)
+            Rfree = np.ones((self.DataBase_Len, 1)) * self.Rf_
+            columns = ['Asset_' + str(i) for i in range(self.VAR_Model.Num_Assets)] + ['Rfree'] + ['Factor_' + str(i) for i in range(self.VAR_Model.Num_Factors)]
 
-        Data = pd.DataFrame(columns = columns, data = np.hstack((Mkt_Returns, Rfree, Factors)))
+            Data = pd.DataFrame(columns = columns, data = np.hstack((Mkt_Returns, Rfree, Factors)))
 
-        kwargs['DataBase'] = Data
-        kwargs['Return_Key'] = ['Asset_' + str(i) for i in range(self.VAR_Model.Num_Assets)]
-        kwargs['Risk_Free_Key'] = 'Rfree'
-        kwargs['State_Parameters'] = ['Factor_' + str(i) for i in range(self.VAR_Model.Num_Factors)]
+            kwargs['DataBase'] = Data
+            kwargs['Return_Key'] = ['Asset_' + str(i) for i in range(self.VAR_Model.Num_Assets)]
+            kwargs['Risk_Free_Key'] = 'Rfree'
+            kwargs['State_Parameters'] = ['Factor_' + str(i) for i in range(self.VAR_Model.Num_Factors)]
 
         super(Sim_VAR_Env, self).Set_Params(**kwargs)
 
