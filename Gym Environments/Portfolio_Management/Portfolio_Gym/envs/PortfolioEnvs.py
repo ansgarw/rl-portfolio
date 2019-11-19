@@ -463,7 +463,7 @@ class Portfolio_Env(gym.Env):
             Ep_Utility = np.ones(2) # 0 : Merton, 1 : Agent
 
             while Done == False:
-                Action = Agent.Predict_Action(State.reshape(1, self.observation_space.shape[0]))
+                Action = Agent.Predict_Action(State)
                 State, Reward, Done, Info = self.step(Action.flatten())
                 Merton_Results['Mean_Return'].append(Info['Rfree'] + np.sum(Info['Mkt-Rf'] * self.Training_Merton))
                 Agent_Results['Mean_Return'].append(Info['Rfree'] + np.sum(Info['Mkt-Rf'] * Action))
@@ -516,7 +516,7 @@ class Portfolio_Env(gym.Env):
         State_0[1] = self.Episode_Length * self.Time_Step * 0.9
 
         while self.Done == False:
-            Action = Agent.Predict_Action(State_0.reshape(1, self.observation_space.shape[0]))
+            Action = Agent.Predict_Action(State_0)
             State_1, Reward, Done, Info = self.step(Action.flatten())
             State_1[1] = self.Episode_Length * self.Time_Step * 0.9
             State_0 = State_1
