@@ -24,7 +24,7 @@ class Wrapper:
         self.Agent = Agent
 
 
-    def Train (self, N_Episodes, Plot = [], Diagnostics = [], Validate = False):
+    def Train (self, N_Episodes, Plot = [], Diagnostics = [], Validate = False, Equity_Curve = False):
         '''
         Train the agent inside the wrapper so plots may be generated. This is the only function the user needs to call.
 
@@ -72,7 +72,10 @@ class Wrapper:
         self.Agent.Train(N_Episodes, Arg_A, Arg_B)
 
         if Validate == True:
-            self.Plot_Data['Validate'] = self.Agent.Environment.Validate(100, self.Agent)
+            self.Plot_Data['Validate'] = self.Agent.Environment.Validate(1000, self.Agent)
+
+        if Equity_Curve == True:
+            self.Plot_Data['Equity_Curve'] = self.Agent.Environment.Equity_Curve(self.Agent)
 
         self.Display()
 
@@ -164,6 +167,7 @@ class Wrapper:
             ax[i].plot(np.array(self.Plot_Data['Mu']), label = 'Actions')
             ax[i].set_xlabel('Step')
             ax[i].set_ylabel('Leverage')
+            ax[i].set_title('Actions Suggested throughout Training')
             if isinstance(self.Agent.Environment.Training_Merton, type(np.array([0]))):
                 for j in range(self.Agent.Environment.Training_Merton.size):
                     ax[i].axhline(self.Agent.Environment.Training_Merton[j], color = 'k')
@@ -178,6 +182,7 @@ class Wrapper:
             ax[i].scatter(np.arange(self.Plot_Data['Merton_Benchmark'].shape[0]), self.Plot_Data['Merton_Benchmark'][:,1], label = 'Merton', color = 'mediumvioletred')
             ax[i].set_xlabel('Steps (x10000)')
             ax[i].set_ylabel('Average Terminal Utility')
+            ax[i].set_title('Average Terminal Utility throughout Training')
             ax[i].legend()
             i += 1
 
@@ -188,6 +193,7 @@ class Wrapper:
             ax[i].scatter(np.arange(self.Plot_Data['VAR_Benchmark'].shape[0]), self.Plot_Data['VAR_Benchmark'][:,1], label = 'Optimal', color = 'mediumvioletred')
             ax[i].set_xlabel('Steps (x10000)')
             ax[i].set_ylabel('Average Terminal Utility')
+            ax[i].set_title('Average Terminal Utility throughout Training')
             ax[i].legend()
             i += 1
 
@@ -196,17 +202,48 @@ class Wrapper:
             ax[i].scatter(np.arange(len(self.Plot_Data['Percent_Merton_Action'])), self.Plot_Data['Percent_Merton_Action'], color = 'mediumvioletred')
             ax[i].set_xlabel('Steps (x10000)')
             ax[i].set_ylabel('Percentage')
+            ax[i].set_title('Percentage of actions within 10% of the Merton fraction')
+
             i += 1
 
 
-        if 'Validate' in self.Plot_Data.keys():
-            ax[i].scatter(np.arange(len(self.Plot_Data['Validate'][0])), self.Plot_Data['Validate'][0], label = 'Agent',  color = 'lightskyblue')
-            ax[i].scatter(np.arange(len(self.Plot_Data['Validate'][1])), self.Plot_Data['Validate'][1], label = 'RFree',  color = 'mediumvioletred')
-            ax[i].scatter(np.arange(len(self.Plot_Data['Validate'][2])), self.Plot_Data['Validate'][2], label = 'Merton', color = 'darkblue')
-            ax[i].set_xlabel('Validation Episode')
-            ax[i].set_ylabel('Utility')
+        if 'Equity_Curve' in self.Plot_Data.keys():
+            ax[i].plot(self.Plot_Data['Equity_Curve']['Merton'], label = 'Merton', color = 'mediumvioletred')
+            ax[i].plot(self.Plot_Data['Equity_Curve']['Agent'], label = 'Agent', color = 'lightskyblue')
+            ax[i].set_xlabel('Steps')
+            ax[i].set_ylabel('Equity')
+            ax[i].set_yscale('log')
+            ax[i].set_title('Validation Equity Curve')
             ax[i].legend()
 
+
+        if 'Validate' in self.Plot_Data.keys():
+
+            # A bar chart will be construced with two series, Merton and Agent. The two series will contain the following info:
+            #   1. Mean Utility
+            #   2. Mean Return
+            #   3. Std of Return
+            #   4. Sharpe Ratio
+
+            X = ('Mean Utility', 'Mean Return', 'Std of Return', 'Sharpe Ratio')
+
+            S1 = [self.Plot_Data['Validate'][0]['Mean_Utility'],
+                  self.Plot_Data['Validate'][0]['Mean_Return'],
+                  self.Plot_Data['Validate'][0]['Return_Std'],
+                  self.Plot_Data['Validate'][0]['Sharpe']]
+            S2 = [self.Plot_Data['Validate'][1]['Mean_Utility'],
+                  self.Plot_Data['Validate'][1]['Mean_Return'],
+                  self.Plot_Data['Validate'][1]['Return_Std'],
+                  self.Plot_Data['Validate'][1]['Sharpe']]
+
+            X_ = np.arange(len(X))
+
+            plt.bar(X_ - 0.15, S1, 0.3, color = 'mediumvioletred', label = 'Merton')
+            plt.bar(X_ + 0.15, S2, 0.3, color = 'lightskyblue', label = 'Agent')
+            plt.xticks(X_, X) # set labels manually
+            plt.legend()
+            plt.title('Validation Statistics')
+            i += 1
 
         plt.show()
 

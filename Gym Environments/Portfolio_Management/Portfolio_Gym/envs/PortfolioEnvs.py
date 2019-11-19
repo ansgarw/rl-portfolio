@@ -443,45 +443,88 @@ class Portfolio_Env(gym.Env):
 
         Returns
         -------
-            A tuple of the following:
-                0. A list of terminal rewards.
-                1. A list of terminal rewards holding the risk free asset
-                2. A list of terminal rewards holding the ex ante merton protfolio (calculated across trianing dataset)
+
         '''
 
-        Terminal_Rewards  = []
-        Risk_Free_Rewards = []
-        Merton_Rewards    = []
+        Merton_Results = {'Mean_Utility' : [],
+                          'Mean_Return'  : [],
+                          'Return_Std'   : [],
+                          'Sharpe'       : []}
+        Agent_Results  = {'Mean_Utility' : [],
+                          'Mean_Return'  : [],
+                          'Return_Std'   : [],
+                          'Sharpe'       : []}
 
         self.isTraining = False
 
         for i in range(N_Episodes):
-            Returns = []
-            RF_Returns = []
             State = self.reset()
             Done = False
+            Ep_Utility = np.ones(2) # 0 : Merton, 1 : Agent
 
             while Done == False:
                 Action = Agent.Predict_Action(State.reshape(1, self.observation_space.shape[0]))
                 State, Reward, Done, Info = self.step(Action.flatten())
-                Returns.append(list(Info['Mkt-Rf']))
-                RF_Returns.append(Info['Rfree'])
+                Merton_Results['Mean_Return'].append(Info['Rfree'] + np.sum(Info['Mkt-Rf'] * self.Training_Merton))
+                Agent_Results['Mean_Return'].append(Info['Rfree'] + np.sum(Info['Mkt-Rf'] * Action))
+                Merton_Results['Sharpe'].append(np.sum(Info['Mkt-Rf'] * self.Training_Merton))
+                Agent_Results['Sharpe'].append(np.sum(Info['Mkt-Rf'] * Action))
+                Ep_Utility[0] *= 1 + Info['Rfree'] + np.sum(Info['Mkt-Rf'] * self.Training_Merton)
+                Ep_Utility[1] *= 1 + Info['Rfree'] + np.sum(Info['Mkt-Rf'] * Action)
 
-                if Done:
-                    Merton_Return = 1
-                    RFree_Return  = 1
-                    Returns = np.array(Returns)
-                    for i in range(Returns.shape[0]):
-                        RFree_Return  *= (1 + RF_Returns[i])
-                        Merton_Return *= (1 + RF_Returns[i] + np.sum(Returns[i] * self.Training_Merton))
+            Merton_Results['Mean_Utility'].append(Ep_Utility[0])
+            Agent_Results['Mean_Utility'].append(Ep_Utility[1])
 
-                    Risk_Free_Rewards.append(self.Utility(RFree_Return))
-                    Merton_Rewards.append(self.Utility(Merton_Return))
-                    Terminal_Rewards.append(Reward)
+        Merton_Results['Mean_Utility'] = np.mean(self.Utility(np.array(Merton_Results['Mean_Utility'])))
+        Merton_Results['Return_Std']   = np.std(Merton_Results['Mean_Return']) * ((1 / self.Time_Step) ** 0.5)
+        Merton_Results['Mean_Return']  = np.mean(Merton_Results['Mean_Return']) / self.Time_Step
+        Merton_Results['Sharpe']       = np.mean(Merton_Results['Sharpe']) / Merton_Results['Return_Std']
 
+        Agent_Results['Mean_Utility'] = np.mean(self.Utility(np.array(Agent_Results['Mean_Utility'])))
+        Agent_Results['Return_Std']   = np.std(Agent_Results['Mean_Return']) * ((1 / self.Time_Step) ** 0.5)
+        Agent_Results['Mean_Return']  = np.mean(Agent_Results['Mean_Return']) / self.Time_Step
+        Agent_Results['Sharpe']       = np.mean(Agent_Results['Sharpe']) / Agent_Results['Return_Std']
 
         self.isTraining = True
-        return Terminal_Rewards, Risk_Free_Rewards, Merton_Rewards
+        return Merton_Results, Agent_Results
+
+
+    def Equity_Curve (self, Agent):
+        '''
+        Draws an equity curve representing the return on investment of holding the Merton Portfolio Fraction, and the Agent Portfolio.
+
+        Notes
+        -----
+            At some point we may remove tau from the state space, or make its includion optimal.
+            If that happens this function must be adjusted, at the moment tau is kept at Episode_Length * Time_Step * 0.9, as any
+            higher figure will cause issues.
+        '''
+
+        self.isTraining = False
+
+        self.Start_Index = self.Validation_Start
+        self.End_Index = self.Validation_End - 1
+        self.Index = self.Start_Index
+
+        self.Wealth = 1
+        self.Done = False
+
+        Agent_Equity = [1]
+        Merton_Equity = [1]
+
+        State_0 = self.Gen_State()
+        State_0[1] = self.Episode_Length * self.Time_Step * 0.9
+
+        while self.Done == False:
+            Action = Agent.Predict_Action(State_0.reshape(1, self.observation_space.shape[0]))
+            State_1, Reward, Done, Info = self.step(Action.flatten())
+            State_1[1] = self.Episode_Length * self.Time_Step * 0.9
+            State_0 = State_1
+
+            Merton_Equity.append(Merton_Equity[-1] * (1 + Info['Rfree'] + np.sum(Info['Mkt-Rf'] * self.Training_Merton)))
+            Agent_Equity.append(State_0[0])
+
+        return {'Agent' : Agent_Equity, 'Merton' : Merton_Equity}
 
 
 
