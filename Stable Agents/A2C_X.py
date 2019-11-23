@@ -33,6 +33,7 @@ class Policy_Network():
 
         self.Learning_Rate = tf.placeholder(tf.float32, shape = (), name = 'A_Learning_Rate')
 
+        # self.Optimizer = tf.train.AdamOptimizer(learning_rate = self.Learning_Rate)
         self.Optimizer = tf.train.AdamOptimizer(learning_rate = self.Learning_Rate)
 
         Loglik_Loss = tf.log(tf.sqrt(2 * np.pi * (self.Sigma ** 2))) + ((self.Action - self.Action_Pred) ** 2) / (2 * (self.Sigma ** 2))
@@ -413,12 +414,15 @@ class Actor_Critic:
             return State, Value, Action, Advantage, Sigma
 
 
-    def Predict_Action (self, X):
+    def Predict_Action (self, X, OOS = False):
         '''
         Parameters
         ----------
             X | np.array
                 A np array of states or a single state for which the action will be predicted.
+
+            OOS | boolean
+                A boolean indicating if the agent is action out of sample (only required for the RNN Agent.)
 
         Returns
         -------

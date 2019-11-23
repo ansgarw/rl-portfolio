@@ -48,7 +48,7 @@ class Portfolio_Env(gym.Env):
         self.State_Data  = Data[self.State_Parameters].values.reshape(-1, len(self.State_Parameters))
         self.Rf          = Data['1M TBill'].values.reshape(-1,1)
 
-        self.Accepted_Keywords = {'Risk_Aversion', 'Episode_Length', 'Max_Leverage', 'Min_Leverage', 'Validation_Frac', 'Intermediate_Reward', 'DataBase', 'State_Parameters', 'Return_Key', 'Risk_Free_Key', 'Time_Step'}
+        self.Accepted_Keywords = {'Risk_Aversion', 'Episode_Length', 'Max_Leverage', 'Min_Leverage', 'Validation_Frac', 'Intermediate_Reward', 'DataBase', 'State_Parameters', 'Return_Key', 'Risk_Free_Key', 'Time_Step', 'First_Difference_Params'}
 
 
         # Plus two as wealth and tau are also part of the state space.
@@ -103,6 +103,11 @@ class Portfolio_Env(gym.Env):
 
 
 
+            First_Difference_Params | list
+                A list of parameters whose first difference rather than absolute value should be used as a state paremeter
+
+
+
         Default Dataset Keys
         --------------------
 
@@ -150,7 +155,7 @@ class Portfolio_Env(gym.Env):
         if 'Time_Step' in kwargs.keys():
             assert 'DataBase' in kwargs.keys(), 'Only specify Time_Step if a new DataBase is in use.'
 
-        if len(set(kwargs.keys()).intersection({'DataBase', 'Return_Key', 'Risk_Free_Key', 'State_Parameters'})) > 0:
+        if len(set(kwargs.keys()).intersection({'DataBase', 'Return_Key', 'Risk_Free_Key', 'State_Parameters', 'First_Difference_Params'})) > 0:
 
             if 'Time_Step'           in kwargs.keys() : self.Time_Step           = kwargs['Time_Step']
             if 'Max_Leverage'        in kwargs.keys() : self.Max_Leverage        = kwargs['Max_Leverage']
@@ -172,6 +177,16 @@ class Portfolio_Env(gym.Env):
 
             Data = Data.dropna()
             Data.reset_index(drop = True, inplace = True)
+
+            if 'First_Difference_Params' in kwargs.keys():
+                for parameter in kwargs['First_Difference_Params']:
+                    Data[parameter] = Data[parameter].pct_change()
+
+                Data = Data.iloc[1:]
+                # print(Data[Data.isna().any(axis=1)])
+
+                for parameter in kwargs['First_Difference_Params']:
+                    assert np.isfinite(np.all(Data[parameter].values)), 'Factor ' + parameter + ' contains inf after taking first difference.'
 
             self.Return_Data = Data[Return_Key].values.reshape(-1,1)
             self.State_Data  = Data[self.State_Parameters].values
@@ -222,6 +237,24 @@ class Portfolio_Env(gym.Env):
         self.Training_Var    = Vars
         self.Training_Mean   = Mean
         self.Training_Merton = self.Merton_Fraction()
+
+
+    def Over_Sample (self, Mult):
+        '''
+
+        Parameters
+        ----------
+            Mult | float
+                The number of synthetic observations to generate, as a multiple of the number of observations in the original dataset.
+
+        Oversamples the dataset using linear interpolation to generate synthetic observations.
+        If the environment is assumed to be a fully observed MDP (and hence a RNN is not being used) then oversampling and damaging the sequence of the time series will not have any detremental effects. It makes no sense to use an RNN with oversampling.
+        Another way to consider this technique is that it makes it much more likely for the NN to approximate the linear relation between the state and return, but additionally still uses the true observations, and hence the network may still incorporate further non-linear relation.
+
+        '''
+
+        pass
+
 
 
     def reset (self):
@@ -463,7 +496,7 @@ class Portfolio_Env(gym.Env):
             Ep_Utility = np.ones(2) # 0 : Merton, 1 : Agent
 
             while Done == False:
-                Action = Agent.Predict_Action(State)
+                Action = Agent.Predict_Action(State, OOS = True)
                 State, Reward, Done, Info = self.step(Action.flatten())
                 Merton_Results['Mean_Return'].append(Info['Rfree'] + np.sum(Info['Mkt-Rf'] * self.Training_Merton))
                 Agent_Results['Mean_Return'].append(Info['Rfree'] + np.sum(Info['Mkt-Rf'] * Action))
@@ -516,7 +549,7 @@ class Portfolio_Env(gym.Env):
         State_0[1] = self.Episode_Length * self.Time_Step * 0.9
 
         while self.Done == False:
-            Action = Agent.Predict_Action(State_0)
+            Action = Agent.Predict_Action(State_0, OOS = True)
             State_1, Reward, Done, Info = self.step(Action.flatten())
             State_1[1] = self.Episode_Length * self.Time_Step * 0.9
             State_0 = State_1
