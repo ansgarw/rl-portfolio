@@ -29,6 +29,8 @@ class Portfolio_Env(gym.Env):
         self.Validation_Frac     = kwargs['Validation_Frac']
         self.Intermediate_Reward = kwargs['Intermediate_Reward']
 
+        self.is_Normalised = True
+
         # Flag used to distinguish a training episode from a validation epiodse, to facilitate cross val.
         self.isTraining = True
 
@@ -48,7 +50,7 @@ class Portfolio_Env(gym.Env):
         self.State_Data  = Data[self.State_Parameters].values.reshape(-1, len(self.State_Parameters))
         self.Rf          = Data['1M TBill'].values.reshape(-1,1)
 
-        self.Accepted_Keywords = {'Risk_Aversion', 'Episode_Length', 'Max_Leverage', 'Min_Leverage', 'Validation_Frac', 'Intermediate_Reward', 'DataBase', 'State_Parameters', 'Return_Key', 'Risk_Free_Key', 'Time_Step', 'First_Difference_Params'}
+        self.Accepted_Keywords = {'Risk_Aversion', 'Episode_Length', 'Max_Leverage', 'Min_Leverage', 'Validation_Frac', 'Intermediate_Reward', 'DataBase', 'State_Parameters', 'Return_Key', 'Risk_Free_Key', 'Time_Step', 'First_Difference_Params', 'Normalise'}
 
 
         # Plus two as wealth and tau are also part of the state space.
@@ -107,6 +109,10 @@ class Portfolio_Env(gym.Env):
                 A list of parameters whose first difference rather than absolute value should be used as a state paremeter
 
 
+            Normalise | bool
+                A boolean indicating if the State data should be normalised. Default = True
+
+
 
         Default Dataset Keys
         --------------------
@@ -157,6 +163,7 @@ class Portfolio_Env(gym.Env):
 
         if len(set(kwargs.keys()).intersection({'DataBase', 'Return_Key', 'Risk_Free_Key', 'State_Parameters', 'First_Difference_Params'})) > 0:
 
+            if 'Normalise'           in kwargs.keys() : self.is_Normalised       = kwargs['Normalise']
             if 'Time_Step'           in kwargs.keys() : self.Time_Step           = kwargs['Time_Step']
             if 'Max_Leverage'        in kwargs.keys() : self.Max_Leverage        = kwargs['Max_Leverage']
             if 'Min_Leverage'        in kwargs.keys() : self.Min_Leverage        = kwargs['Min_Leverage']
@@ -193,6 +200,7 @@ class Portfolio_Env(gym.Env):
             self.Rf          = Data[Risk_Free_Key].values.reshape(-1,1)
 
         else:
+            if 'Normalise'           in kwargs.keys() : self.is_Normalised       = kwargs['Normalise']
             if 'Max_Leverage'        in kwargs.keys() : self.Max_Leverage        = kwargs['Max_Leverage']
             if 'Min_Leverage'        in kwargs.keys() : self.Min_Leverage        = kwargs['Min_Leverage']
             if 'Risk_Aversion'       in kwargs.keys() : self.Risk_Aversion       = kwargs['Risk_Aversion']
@@ -231,6 +239,11 @@ class Portfolio_Env(gym.Env):
             self.Validation_Start = int(self.Return_Data.shape[0] * (1 - self.Validation_Frac))
             self.Validation_End   = int(self.Return_Data.shape[0])
 
+        if self.is_Normalised == True:
+            inSample_Mean = np.mean(np.vstack((self.State_Data[0:self.Validation_Start], self.State_Data[self.Validation_End:])), axis = 0)
+            inSample_Std = np.std(np.vstack((self.State_Data[0:self.Validation_Start], self.State_Data[self.Validation_End:])), axis = 0)
+            self.State_Data = (self.State_Data - inSample_Mean) / inSample_Std
+
         Mean = np.mean(np.vstack((self.Return_Data[0:self.Validation_Start], self.Return_Data[self.Validation_End:])), axis = 0)
         Vars = np.var(np.vstack((self.Return_Data[0:self.Validation_Start], self.Return_Data[self.Validation_End:])), axis = 0)
 
@@ -239,21 +252,85 @@ class Portfolio_Env(gym.Env):
         self.Training_Merton = self.Merton_Fraction()
 
 
-    def Over_Sample (self, Mult):
-        '''
+    def Over_Sample (self, Mult, N_ = 5, P_ = 2):
 
+        '''
         Parameters
         ----------
             Mult | float
                 The number of synthetic observations to generate, as a multiple of the number of observations in the original dataset.
 
-        Oversamples the dataset using linear interpolation to generate synthetic observations.
-        If the environment is assumed to be a fully observed MDP (and hence a RNN is not being used) then oversampling and damaging the sequence of the time series will not have any detremental effects. It makes no sense to use an RNN with oversampling.
-        Another way to consider this technique is that it makes it much more likely for the NN to approximate the linear relation between the state and return, but additionally still uses the true observations, and hence the network may still incorporate further non-linear relation.
+            N_ | int
+                The number of neighbours to find, and randomly select between for interpolation
+
+            P_ | float
+                Coefficient for Minkowski distance
+
+
+        Notes
+        -----
+            1. Synthetic observations will exhibit no autocorrolation, and hence the problem becomes a fully observed MDP, and using a RNN based AC makes no sense.
+            2. The Minkowski distance is used to determine the nearest neighbours (defualt p = 2, giving euclidean distance)
+            3. Synthetic observations are appended to the end of the training dataset, so the time-series data is unaffected.
+            4. Persuant to the original paper proposing SMOTE, synthetics will not be generated from other synthetics.
 
         '''
 
-        pass
+        # Step one - Normalise the training data.
+        if self.is_Normalised == True:
+            Original_State = np.vstack((self.State_Data[:self.Validation_Start], self.State_Data[self.Validation_End:]))
+        else:
+            inSample_Mean = np.mean(np.vstack((self.State_Data[0:self.Validation_Start], self.State_Data[self.Validation_End:])), axis = 0)
+            inSample_Std = np.std(np.vstack((self.State_Data[0:self.Validation_Start], self.State_Data[self.Validation_End:])), axis = 0)
+            Original_State = (np.vstack((self.State_Data[:self.Validation_Start], self.State_Data[self.Validation_End:])) - inSample_Mean) / inSample_Std
+
+        Original_Return = np.vstack((self.Return_Data[:self.Validation_Start], self.Return_Data[self.Validation_End:]))
+        Original_Rf = np.vstack((self.Rf[:self.Validation_Start], self.Rf[self.Validation_End:]))
+
+
+        # Step Two - Generate synthetic observations.
+        # 1. Pick a datapoint at random
+        # 2. Find its N nearest neighbours
+        # 3. Select one of thgem at random
+        # 4. Interpolate between the two points to genetate a synthetic observation.
+
+        def Nearest_Neighbours (Observation, N, P):
+            '''
+            Returns the index of the N nearest neighbours of the Observation containied within the variable 'Original_State'.
+
+            Parameters
+            ----------
+                N | int
+                    The number of neighbours to find.
+
+                Observation | np.array (1D)
+                    The observation whose neighbours are to be found.
+
+            '''
+
+            Distance = np.sum((Original_State - Observation) ** P, axis = 1) ** (1/P)
+            return np.argsort(Distance)[1 : N+1]
+
+        Synthetic_Obs = np.zeros((Mult * Original_State.shape[0], Original_State.shape[1]))
+        Synthetic_Returns = np.zeros((Mult * Original_Return.shape[0], Original_Return.shape[1]))
+        Synthetic_Rf = np.zeros((Mult * Original_Rf.shape[0], Original_Rf.shape[1]))
+
+        for i in range(Synthetic_Obs.shape[0]):
+            Obs_Index = np.random.randint(low = 0, high = Original_State.shape[0])
+            Neighbour_Index = np.random.choice(Nearest_Neighbours(Original_State[Obs_Index], N_, P_), 1)
+
+            Interpolate_Frac = np.random.uniform()
+            Synthetic_Obs[i] = (Original_State[Neighbour_Index] - Original_State[Obs_Index]) * Interpolate_Frac + Original_State[Obs_Index]
+            Synthetic_Returns[i] = (Original_Return[Neighbour_Index] - Original_Return[Obs_Index]) * Interpolate_Frac + Original_Return[Obs_Index]
+            Synthetic_Rf[i] = (Original_Rf[Neighbour_Index] - Original_Rf[Obs_Index]) * Interpolate_Frac + Original_Rf[Obs_Index]
+
+        if self.is_Normalised == False:
+            # Un-normalise the data
+            Synthetic_Obs = (Synthetic_Obs + inSample_Mean) * inSample_Std
+
+        self.State_Data = np.vstack((self.State_Data, Synthetic_Obs))
+        self.Return_Data = np.vstack((self.Return_Data, Synthetic_Returns))
+        self.Rf = np.vstack((self.Rf, Synthetic_Rf))
 
 
     def reset (self):
