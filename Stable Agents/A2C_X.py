@@ -20,18 +20,18 @@ class Policy_Network():
         Activation_Method = self._Activation(Activation)
         Regularizer       = tf.keras.regularizers.l2(Alpha) if Alpha != 0 else None
 
-        self.State     = tf.placeholder(shape = [None, Input_Dim], dtype = tf.float32, name = 'A_States')
-        self.Action    = tf.placeholder(shape = [None, Output_Dim], dtype = tf.float32, name = 'Action_True')
-        self.Advantage = tf.placeholder(shape = [None, 1], dtype = tf.float32, name = 'Advantage')
-        self.Sigma     = tf.placeholder(shape = [None, Output_Dim], dtype = tf.float32, name = 'Sigma')
+        self.State     = tf.placeholder(shape = [None, Input_Dim], dtype = tf.float32)
+        self.Action    = tf.placeholder(shape = [None, Output_Dim], dtype = tf.float32)
+        self.Advantage = tf.placeholder(shape = [None, 1], dtype = tf.float32)
+        self.Sigma     = tf.placeholder(shape = [None, Output_Dim], dtype = tf.float32)
 
         Last_Layer = self.State
         for Layer in Shape:
             Last_Layer = tf.layers.dense(Last_Layer, Layer, activation = Activation_Method, activity_regularizer = Regularizer)
 
-        self.Action_Pred = tf.layers.dense(Last_Layer, Output_Dim, activation = None, activity_regularizer = Regularizer, name = 'Action_Pred')
+        self.Action_Pred = tf.layers.dense(Last_Layer, Output_Dim, activation = None, activity_regularizer = Regularizer)
 
-        self.Learning_Rate = tf.placeholder(tf.float32, shape = (), name = 'A_Learning_Rate')
+        self.Learning_Rate = tf.placeholder(tf.float32, shape = ())
 
         # self.Optimizer = tf.train.AdamOptimizer(learning_rate = self.Learning_Rate)
         self.Optimizer = tf.train.AdamOptimizer(learning_rate = self.Learning_Rate)
@@ -76,16 +76,16 @@ class Value_Network():
         Activation_Method = self._Activation(Activation)
         Regularizer       = tf.keras.regularizers.l2(Alpha) if Alpha != 0 else None
 
-        self.State = tf.placeholder(shape = [None, Input_Dim], dtype = tf.float32, name = 'C_States')
-        self.Value = tf.placeholder(shape = [None, Output_Dim], dtype = tf.float32, name = 'Value_True')
+        self.State = tf.placeholder(shape = [None, Input_Dim], dtype = tf.float32)
+        self.Value = tf.placeholder(shape = [None, Output_Dim], dtype = tf.float32)
 
         Last_Layer = self.State
         for Layer in Shape:
             Last_Layer = tf.layers.dense(Last_Layer, Layer, activation = Activation_Method, activity_regularizer = Regularizer)
 
-        self.Value_Pred = tf.layers.dense(Last_Layer, Output_Dim, activation = None, activity_regularizer = Regularizer, name = 'Value_Pred')
+        self.Value_Pred = tf.layers.dense(Last_Layer, Output_Dim, activation = None, activity_regularizer = Regularizer)
 
-        self.Learning_Rate = tf.placeholder(tf.float32, shape = (), name = 'C_Learning_Rate')
+        self.Learning_Rate = tf.placeholder(tf.float32, shape = ())
 
         self.Optimizer = tf.train.AdamOptimizer(learning_rate = self.Learning_Rate)
 
@@ -156,7 +156,7 @@ class TD_Lambda_Engine:
 
 class Actor_Critic:
 
-    def __init__ (self, Environment, Actor_Hypers, Critic_Hypers, Gamma, Sigma_Range, Sigma_Anneal, Retrain_Frequency, Action_Space_Clip = 10, Experiance_Mode = 'Monte_Carlo', TD_Lambda = [1, 0.8, 0.5], Monte_Carlo_Frac = 0.1, Ignore_Actor_Frac = 0.0):
+    def __init__ (self, **kwargs):
 
         '''
         Parameters
@@ -208,23 +208,41 @@ class Actor_Critic:
 
         '''
 
-        self.Retrain_Frequency = Retrain_Frequency
-        self.Sigma_Range       = Sigma_Range
-        self.Sigma_Anneal      = Sigma_Anneal
-        self.Gamma             = Gamma
-        self.State_Dim         = Environment.observation_space.shape[0]
-        self.Action_Dim        = Environment.action_space.shape[0]
-        self.Action_Space_Clip = Action_Space_Clip
+        self.Environment = kwargs['Environment']
 
-        self.Experiance_Mode   = Experiance_Mode
-        self.TD_Lambda         = TD_Lambda
-        self.Monte_Carlo_Frac  = Monte_Carlo_Frac
-        self.Ignore_Actor_Frac = Ignore_Actor_Frac
+        self.Retrain_Frequency = kwargs['Retrain_Frequency'] if 'Retrain_Frequency' in kwargs.keys() else 20
+        self.Sigma_Range       = kwargs['Sigma_Range']       if 'Sigma_Range' in kwargs.keys() else [2, 0.5]
+        self.Sigma_Anneal      = kwargs['Sigma_Anneal']      if 'Sigma_Anneal' in kwargs.keys() else 1
+        self.Gamma             = kwargs['Gamma']             if 'Gamma' in kwargs.keys() else 0.999
+        self.State_Dim         = self.Environment.observation_space.shape[0]
+        self.Action_Dim        = self.Environment.action_space.shape[0]
+        self.Action_Space_Clip = kwargs['Action_Space_Clip'] if 'Action_Space_Clip' in kwargs.keys() else 75
 
-        assert self.Experiance_Mode in ['Monte_Carlo', 'TD_1', 'TD_Lambda'], 'Experiance_Mode must be one of [Monte_Carlo, TD_1, TD_Lambda]'
+        self.Experiance_Mode   = kwargs['Experiance_Mode']   if 'Experiance_Mode' in kwargs.keys() else 'TD_Lambda'
+        self.TD_Lambda         = kwargs['TD_Lambda']         if 'TD_Lambda' in kwargs.keys() else 0.5
+        self.Monte_Carlo_Frac  = kwargs['Monte_Carlo_Frac']  if 'Monte_Carlo_Frac' in kwargs.keys() else 0.1
+        self.Ignore_Actor_Frac = kwargs['Ignore_Actor_Frac'] if 'Ignore_Actor_Frac' in kwargs.keys() else 0.0
 
-        self.Actor_Hypers  = Actor_Hypers
-        self.Critic_Hypers = Critic_Hypers
+        if 'Actor_Hypers' in kwargs.keys():
+            self.Actor_Hypers = kwargs['Actor_Hypers']
+        else:
+            self.Actor_Hypers  = {'Network Size'  : kwargs['Actor_Network_Size'],
+                                  'Learning Rate' : kwargs['Actor_Learning_Rate'],
+                                  'Activation'    : kwargs['Actor_Activation'],
+                                  'Batch Size'    : kwargs['Actor_Batch_Size'],
+                                  'Epoch'         : kwargs['Actor_Epoch'],
+                                  'Alpha'         : kwargs['Actor_Alpha']}
+
+
+        if 'Critic_Hypers' in kwargs.keys():
+            self.Critic_Hypers = kwargs['Critic_Hypers']
+        else:
+            self.Critic_Hypers = {'Network Size'  : kwargs['Critic_Network_Size'],
+                                  'Learning Rate' : kwargs['Critic_Learning_Rate'],
+                                  'Activation'    : kwargs['Critic_Activation'],
+                                  'Batch Size'    : kwargs['Critic_Batch_Size'],
+                                  'Epoch'         : kwargs['Critic_Epoch'],
+                                  'Alpha'         : kwargs['Critic_Alpha']}
 
         self.TD_Lambda_Eng = TD_Lambda_Engine(self.Gamma)
 
@@ -236,10 +254,11 @@ class Actor_Critic:
                                     Activation    = self.Critic_Hypers["Activation"],
                                     Alpha         = self.Critic_Hypers["Alpha"])
 
-        self.Environment = Environment
-
         self.TF_Session = tf.Session()
         self.TF_Session.run(tf.global_variables_initializer())
+
+        assert self.Experiance_Mode in ['Monte_Carlo', 'TD_1', 'TD_Lambda'], 'Experiance_Mode must be one of [Monte_Carlo, TD_1, TD_Lambda]'
+
 
 
     def Train (self, N_Episodes, Plot = Empty, Diag = Empty):

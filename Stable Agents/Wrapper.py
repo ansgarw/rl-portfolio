@@ -72,7 +72,7 @@ class Wrapper:
         self.Agent.Train(N_Episodes, Arg_A, Arg_B)
 
         if Validate == True:
-            self.Plot_Data['Validate'] = self.Agent.Environment.Validate(1000, self.Agent)
+            self.Plot_Data['Validate'] = self.Agent.Environment.Validate(10000, self.Agent)
 
         if Equity_Curve == True:
             self.Plot_Data['Equity_Curve'] = self.Agent.Environment.Equity_Curve(self.Agent)
