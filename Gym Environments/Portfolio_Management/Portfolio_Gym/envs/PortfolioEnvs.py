@@ -29,7 +29,8 @@ class Portfolio_Env(gym.Env):
         self.Validation_Frac     = kwargs['Validation_Frac']
         self.Intermediate_Reward = kwargs['Intermediate_Reward']
 
-        self.is_Normalised = True
+        self.is_Normalised = False
+        self.Multi_Asset_Method = 'Equal_Weight'
 
         # Flag used to distinguish a training episode from a validation epiodse, to facilitate cross val.
         self.isTraining = True
@@ -50,7 +51,7 @@ class Portfolio_Env(gym.Env):
         self.State_Data  = Data[self.State_Parameters].values.reshape(-1, len(self.State_Parameters))
         self.Rf          = Data['1M TBill'].values.reshape(-1,1)
 
-        self.Accepted_Keywords = {'Risk_Aversion', 'Episode_Length', 'Max_Leverage', 'Min_Leverage', 'Validation_Frac', 'Intermediate_Reward', 'DataBase', 'State_Parameters', 'Return_Key', 'Risk_Free_Key', 'Time_Step', 'First_Difference_Params', 'Normalise'}
+        self.Accepted_Keywords = {'Risk_Aversion', 'Episode_Length', 'Max_Leverage', 'Min_Leverage', 'Validation_Frac', 'Intermediate_Reward', 'DataBase', 'State_Parameters', 'Return_Key', 'Risk_Free_Key', 'Time_Step', 'First_Difference_Params', 'Normalise', 'Multi_Asset_Method'}
 
 
         # Plus two as wealth and tau are also part of the state space.
@@ -104,13 +105,16 @@ class Portfolio_Env(gym.Env):
                 A pandas dataframe containing a custom database if desired. If this is overloaded, State_Parameters, Return_Key and Risk_Free_Key must also be specified.
 
 
+            Multi_Asset_Method | string
+                The benchmark to use for multi-asset investing. Either 'Equal_Weight' or 'Treynor_Black'
+
 
             First_Difference_Params | list
                 A list of parameters whose first difference rather than absolute value should be used as a state paremeter
 
 
             Normalise | bool
-                A boolean indicating if the State data should be normalised. Default = True
+                A boolean indicating if the State data should be normalised. Default = False
 
 
 
@@ -171,16 +175,24 @@ class Portfolio_Env(gym.Env):
             if 'Episode_Length'      in kwargs.keys() : self.Episode_Length      = kwargs['Episode_Length']
             if 'Validation_Frac'     in kwargs.keys() : self.Validation_Frac     = kwargs['Validation_Frac']
             if 'State_Parameters'    in kwargs.keys() : self.State_Parameters    = kwargs['State_Parameters']
+            if 'Multi_Asset_Method'  in kwargs.keys() : self.Multi_Asset_Method  = kwargs['Multi_Asset_Method']
             if 'Intermediate_Reward' in kwargs.keys() : self.Intermediate_Reward = kwargs['Intermediate_Reward']
 
             Data          = kwargs['DataBase']      if 'DataBase'      in kwargs.keys() else pd.read_csv(_Default_Filename)
             Return_Key    = kwargs['Return_Key']    if 'Return_Key'    in kwargs.keys() else 'Fama Mkt Excess'
             Risk_Free_Key = kwargs['Risk_Free_Key'] if 'Risk_Free_Key' in kwargs.keys() else '1M TBill'
 
+            assert Return_Key != Risk_Free_Key, 'Return key may not be the same as risk free key.'
+
             if isinstance(Return_Key, list):
-                Data = Data[self.State_Parameters + Return_Key + [Risk_Free_Key]]
+                Keys = set(self.State_Parameters)
+                Keys.update(Return_Key + [Risk_Free_Key])
+                Data = Data[list(Keys)]
             else:
-                Data = Data[self.State_Parameters + [Return_Key, Risk_Free_Key]]
+                Keys = set(self.State_Parameters)
+                Keys.update([Return_Key, Risk_Free_Key])
+                Data = Data[list(Keys)]
+
 
             Data = Data.dropna()
             Data.reset_index(drop = True, inplace = True)
@@ -195,7 +207,7 @@ class Portfolio_Env(gym.Env):
                 for parameter in kwargs['First_Difference_Params']:
                     assert np.isfinite(np.all(Data[parameter].values)), 'Factor ' + parameter + ' contains inf after taking first difference.'
 
-            self.Return_Data = Data[Return_Key].values.reshape(-1,1)
+            self.Return_Data = Data[Return_Key].values if isinstance(Return_Key, list) else Data[Return_Key].values.reshape(-1,1)
             self.State_Data  = Data[self.State_Parameters].values
             self.Rf          = Data[Risk_Free_Key].values.reshape(-1,1)
 
@@ -206,6 +218,7 @@ class Portfolio_Env(gym.Env):
             if 'Risk_Aversion'       in kwargs.keys() : self.Risk_Aversion       = kwargs['Risk_Aversion']
             if 'Episode_Length'      in kwargs.keys() : self.Episode_Length      = kwargs['Episode_Length']
             if 'Validation_Frac'     in kwargs.keys() : self.Validation_Frac     = kwargs['Validation_Frac']
+            if 'Multi_Asset_Method'  in kwargs.keys() : self.Multi_Asset_Method  = kwargs['Multi_Asset_Method']
             if 'Intermediate_Reward' in kwargs.keys() : self.Intermediate_Reward = kwargs['Intermediate_Reward']
 
 
@@ -507,7 +520,7 @@ class Portfolio_Env(gym.Env):
 
     def Merton_Fraction (self):
         '''
-        Calculates the Merton portfolio fraction if there is only one asset, or the Markowitz portfolio and Merton portfolio fraction if multiple assets are being used.
+        Calculates the Merton portfolio fraction if there is only one asset, or the Equal_Weight / Treynor_Black portfolio and Merton portfolio fraction if multiple assets are being used.
 
         Returns
         -------
@@ -517,25 +530,58 @@ class Portfolio_Env(gym.Env):
             np.array (1D)
                 In the case of multiple assets. Represents the optimal fraction of ones wealth to invest in each asset.
 
+        Notes
+        -----
+
         '''
 
         if self.Return_Data.shape[1] == 1:
             return self.Training_Mean[0] / ((self.Training_Var[0]) * self.Risk_Aversion)
 
         else:
-            Cov = np.cov(np.vstack((self.Return_Data[0:self.Validation_Start], self.Return_Data[self.Validation_End:])), rowvar = False)
-            Data = {'Mean'  : self.Training_Mean,
-                    'Var'   : self.Training_Var,
-                    'Cov'   : Cov}
 
-            cons = [{'type': 'ineq', 'fun': lambda x:  np.sum(x) - 1},
-                    {'type': 'ineq', 'fun': lambda x: -np.sum(x) + 1}]
+            # Since Markowitz is not robust for many assets (especially if they have high corrolation), here we use a Treynor Black portfolio as a benchmark
+            # The index for calculating this method is defined as an equal weighted portfolio of the N assets
 
-            Weights = np.array(minimize(Sharpe_Ratio, [1 / Data['Mean'].size] * Data['Mean'].size, args = (Data), constraints = cons).x).reshape(-1,1)
-            Var = np.matmul(np.matmul(Weights.T, Cov), Weights)[0,0]
-            Merton_Leverage = (np.sum(Weights * Data['Mean'])) / (self.Risk_Aversion * Var)
+            if self.Multi_Asset_Method == 'Equal_Weight':
 
-            return Weights * Merton_Leverage
+                Index_Weights = np.ones(self.Return_Data.shape[1]) / self.Return_Data.shape[1]
+                Training_Returns = np.vstack((self.Return_Data[0:self.Validation_Start], self.Return_Data[self.Validation_End:]))
+                Index_Returns = np.matmul(Training_Returns, Index_Weights.reshape(-1,1))
+
+                Merton_Leverage = np.mean(Index_Returns) / (self.Risk_Aversion * np.var(Index_Returns))
+
+                return Index_Weights * Merton_Leverage
+
+            else :
+
+                Index_Weights = np.ones(self.Return_Data.shape[1]) / self.Return_Data.shape[1]
+                Training_Returns = np.vstack((self.Return_Data[0:self.Validation_Start], self.Return_Data[self.Validation_End:]))
+                Index_Returns = np.matmul(Training_Returns, Index_Weights.reshape(-1,1))
+
+                Index_Var = np.var(Index_Returns)
+                Index_Mean = np.mean(Index_Returns)
+
+                # Now calculate the beta for each asset
+                Betas  = np.zeros(self.Return_Data.shape[1])
+                Alphas = np.zeros(self.Return_Data.shape[1])
+                Idiosyncratic_Var = np.zeros(self.Return_Data.shape[1])
+
+                for i in range(self.Return_Data.shape[1]):
+                    Betas[i] = np.cov(np.hstack((Training_Returns[:,i].reshape(-1,1), Index_Returns.reshape(-1,1))))[0,1] / Index_Var
+                    Alphas[i] = np.mean(Training_Returns[:,i]) - Index_Mean * Betas[i]
+                    Idiosyncratic_Var[i] = np.var(Training_Returns[:,i]) - Index_Var * Betas[i]
+
+
+                # Now we can calculate portfolio weights, overweighting stocks with positive alpha relative to their Idiosyncratic_Var
+                Active_Weights = Alphas / Idiosyncratic_Var
+                Passive_Weights = ((Index_Mean / Index_Var) - np.sum(Betas * Active_Weights)) / self.Return_Data.shape[0]
+
+                Portfolio_Weights = Active_Weights + Passive_Weights
+                Portfolio_Returns = np.matmul(Training_Returns, Portfolio_Weights)
+
+                Merton_Leverage = np.mean(Portfolio_Returns) / (self.Risk_Aversion * np.var(Portfolio_Returns))
+                return (Portfolio_Weights * Merton_Leverage).flatten()
 
 
     def Validate (self, N_Episodes, Agent):
@@ -545,7 +591,7 @@ class Portfolio_Env(gym.Env):
         Parameters
         ----------
             N_Episodes | int
-                The number of episodes to validate across.
+                Deprecated
 
             Agent | A compatible AC or DQN Agent.
                 The Agent to validate.
@@ -564,35 +610,50 @@ class Portfolio_Env(gym.Env):
                           'Return_Std'   : [],
                           'Sharpe'       : []}
 
+
         self.isTraining = False
 
-        for i in range(N_Episodes):
-            State = self.reset()
-            Done = False
-            Ep_Utility = np.ones(2) # 0 : Merton, 1 : Agent
+        self.Start_Index = self.Validation_Start
+        self.End_Index = self.Validation_End - 1
+        self.Index = self.Start_Index
 
-            while Done == False:
-                Action = Agent.Predict_Action(State, OOS = True)
-                State, Reward, Done, Info = self.step(Action.flatten())
-                Merton_Results['Mean_Return'].append(Info['Rfree'] + np.sum(Info['Mkt-Rf'] * self.Training_Merton))
-                Agent_Results['Mean_Return'].append(Info['Rfree'] + np.sum(Info['Mkt-Rf'] * Action))
-                Merton_Results['Sharpe'].append(np.sum(Info['Mkt-Rf'] * self.Training_Merton))
-                Agent_Results['Sharpe'].append(np.sum(Info['Mkt-Rf'] * Action))
-                Ep_Utility[0] *= 1 + Info['Rfree'] + np.sum(Info['Mkt-Rf'] * self.Training_Merton)
-                Ep_Utility[1] *= 1 + Info['Rfree'] + np.sum(Info['Mkt-Rf'] * Action)
+        self.Wealth = 1
+        self.Done = False
+        Ep_Utility = np.ones(2) # 0 : Merton, 1 : Agent
 
-            Merton_Results['Mean_Utility'].append(Ep_Utility[0])
-            Agent_Results['Mean_Utility'].append(Ep_Utility[1])
+        State_0 = self.Gen_State()
+        State_0[1] = self.Episode_Length * self.Time_Step * 0.9
+
+        i = 0
+        while self.Done == False:
+            Action = Agent.Predict_Action(State_0, OOS = True)
+            State_1, Reward, Done, Info = self.step(Action.flatten())
+            State_1[1] = self.Episode_Length * self.Time_Step * 0.9
+            State_0 = State_1
+
+            i += 1
+
+            Merton_Results['Mean_Return'].append(Info['Rfree'] + np.sum(Info['Mkt-Rf'] * self.Training_Merton))
+            Agent_Results['Mean_Return'].append(Info['Rfree'] + np.sum(Info['Mkt-Rf'] * Action))
+            Merton_Results['Sharpe'].append(np.sum(Info['Mkt-Rf'] * self.Training_Merton))
+            Agent_Results['Sharpe'].append(np.sum(Info['Mkt-Rf'] * Action))
+            Ep_Utility[0] *= 1 + Info['Rfree'] + np.sum(Info['Mkt-Rf'] * self.Training_Merton)
+            Ep_Utility[1] *= 1 + Info['Rfree'] + np.sum(Info['Mkt-Rf'] * Action)
+
+            if i % self.Episode_Length == 0:
+                Merton_Results['Mean_Utility'].append(Ep_Utility[0])
+                Agent_Results['Mean_Utility'].append(Ep_Utility[1])
+                Ep_Utility = np.ones(2)
 
         Merton_Results['Mean_Utility'] = np.mean(self.Utility(np.array(Merton_Results['Mean_Utility'])))
         Merton_Results['Return_Std']   = np.std(Merton_Results['Mean_Return']) * ((1 / self.Time_Step) ** 0.5)
         Merton_Results['Mean_Return']  = np.mean(Merton_Results['Mean_Return']) / self.Time_Step
-        Merton_Results['Sharpe']       = np.mean(Merton_Results['Sharpe']) / Merton_Results['Return_Std']
+        Merton_Results['Sharpe']       = (np.mean(Merton_Results['Sharpe']) / self.Time_Step) / Merton_Results['Return_Std']
 
         Agent_Results['Mean_Utility'] = np.mean(self.Utility(np.array(Agent_Results['Mean_Utility'])))
         Agent_Results['Return_Std']   = np.std(Agent_Results['Mean_Return']) * ((1 / self.Time_Step) ** 0.5)
         Agent_Results['Mean_Return']  = np.mean(Agent_Results['Mean_Return']) / self.Time_Step
-        Agent_Results['Sharpe']       = np.mean(Agent_Results['Sharpe']) / Agent_Results['Return_Std']
+        Agent_Results['Sharpe']       = (np.mean(Agent_Results['Sharpe']) / self.Time_Step) / Agent_Results['Return_Std']
 
         self.isTraining = True
         return Merton_Results, Agent_Results
@@ -634,47 +695,6 @@ class Portfolio_Env(gym.Env):
             Agent_Equity.append(State_0[0])
 
         return {'Agent' : Agent_Equity, 'Merton' : Merton_Equity}
-
-
-
-def Sharpe_Ratio(Weights, Data):
-    '''
-    This function is used by the Merton_Fraction to calculate the Markowitz portfolio.
-
-    Parameters
-    ----------
-        Data | dict
-            A dictionary with the following keys:
-
-            'Mean' | np.array 1D
-                The mean excess returns of the asset(s)
-
-            'Var' | np.array 1D
-                The variance of return of the asset(s)
-
-            'Cov' | np.array 2D
-                The covaraince matrix of asset(s) return
-
-    Returns
-    -------
-        float
-            The negative absolute sharpe ratio.
-
-    Notes
-    -----
-        Scipy.optimise.minimise is used for the optimiser routine, hence the negative sharpe must be returned.
-        The abs sharpe is used, as we can just short the portfolio with the highest abs sharpe if it happens to be negative. This ensures the sim works with assets with both positive and negative mean returns.
-    '''
-
-    Weights = np.array(Weights).reshape(-1,1)
-    Excess_ret = np.sum(Weights * Data['Mean'])
-
-    Var = np.matmul(np.matmul(Weights.T, Data['Cov']), Weights)
-
-    Sharpe = Excess_ret / (Var ** 0.5)[0,0]
-
-    return -np.abs(Sharpe)
-
 
 
 class Sim_GBM_Env (Portfolio_Env):

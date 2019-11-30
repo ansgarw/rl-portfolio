@@ -23,7 +23,7 @@ class Policy_Network():
         self.State     = tf.placeholder(shape = [None, Input_Dim], dtype = tf.float32)
         self.Action    = tf.placeholder(shape = [None, Output_Dim], dtype = tf.float32)
         self.Advantage = tf.placeholder(shape = [None, 1], dtype = tf.float32)
-        self.Sigma     = tf.placeholder(shape = [None, Output_Dim], dtype = tf.float32)
+        self.Sigma     = tf.placeholder(shape = [None, 1], dtype = tf.float32)
 
         Last_Layer = self.State
         for Layer in Shape:
@@ -126,19 +126,19 @@ class TD_Lambda_Engine:
         self.Gamma = Gamma
         self.Extend_Gamma(101)
 
-    def Extend_Gamma (self, Lenght):
+    def Extend_Gamma (self, Length):
 
-        self.Gammas = np.ones(101) * self.Gamma
+        self.Gammas = np.ones(Length) * self.Gamma
         for i in range(0, self.Gammas.size):
             self.Gammas[i] = self.Gammas[i] ** i
 
     def TD_Lambda (self, Rewards, Values, Lambda):
 
-        if Rewards.size > self.Gammas.size:
-            self.Extend_Gamma(Rewards.size + 1)
+        if Rewards.size + 1 >= self.Gammas.size:
+            self.Extend_Gamma(Rewards.size + 2)
 
         TD_Returns = np.zeros(Rewards.size)
-        for i in range(len(Rewards)):
+        for i in range(Rewards.size):
             TD_Returns[i] = np.sum(Rewards[:i+1] * self.Gammas[:i+1]) + Values[i] * self.Gammas[i+1]
 
         Value = 0
@@ -260,7 +260,6 @@ class Actor_Critic:
         assert self.Experiance_Mode in ['Monte_Carlo', 'TD_1', 'TD_Lambda'], 'Experiance_Mode must be one of [Monte_Carlo, TD_1, TD_Lambda]'
 
 
-
     def Train (self, N_Episodes, Plot = Empty, Diag = Empty):
 
         '''
@@ -281,7 +280,6 @@ class Actor_Critic:
 
         Episode_Exps = []
         Plot_Exps    = []
-        Step_Count = 0
 
         for i in tqdm.tqdm(range(N_Episodes)):
             Done = False
@@ -298,16 +296,14 @@ class Actor_Critic:
                 State_1, Reward, Done, Info = self.Environment.step(Leverage)
                 Episode_Exp.append({"s0" : State_0, "s1" : State_1, "r" : Reward, "a" : Leverage, 'i' : Info, 'Mu' : Mu, 'Sigma' : Sigma, 'd' : Done})
                 State_0 = State_1
-                Step_Count += 1
 
 
             Episode_Exps.append(Episode_Exp)
             Plot_Exps.append(Episode_Exp)
 
-            if Step_Count > 10000:
+            if i % int(N_Episodes / 50) == 0:
                 Plot(Plot_Exps)
                 Plot_Exps  = []
-                Step_Count = 0
 
             if i % int(N_Episodes / 5) == 0:
                 Diag()
